@@ -194,7 +194,7 @@ mod tests {
             let second = generate_tile(kind, 20);
             assert_eq!(first, second);
             assert_eq!(first.len(), TILE * TILE * 4);
-            for pixel in first.chunks_exact(4) {
+            for pixel in first.as_chunks::<4>().0 {
                 let alpha = pixel[3];
                 assert!(pixel[0] <= alpha);
                 assert!(pixel[1] <= alpha);
@@ -207,6 +207,10 @@ mod tests {
     fn excessive_intensity_is_safely_clamped() {
         let tile = generate_tile(TextureKind::ClassicMatte, u32::MAX);
         assert_eq!(tile.len(), TILE * TILE * 4);
-        assert!(tile.chunks_exact(4).all(|pixel| pixel[3] == u8::MAX));
+        assert!(tile
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| pixel[3] == u8::MAX));
     }
 }
