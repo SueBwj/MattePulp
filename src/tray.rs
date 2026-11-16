@@ -20,7 +20,7 @@ const TRAY_UID: u32 = 1;
 const CONTROL_CLASS: PCWSTR = w!("SuePaperControl");
 const ICON_SIZE: i32 = 64;
 const ICON_BGRA: &[u8; ICON_SIZE as usize * ICON_SIZE as usize * 4] =
-    include_bytes!("../assets/logo-s-64.bgra");
+    include_bytes!("../assets/app-icon-64.bgra");
 
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()

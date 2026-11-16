@@ -48,7 +48,7 @@ Requires a Rust stable toolchain (`stable-x86_64-pc-windows-gnu` or MSVC both wo
 # Output: target/release/sue-paper.exe
 ```
 
-The script builds the program, then embeds the multi-size `S` logo into the EXE's Windows icon resources, so the tray, File Explorer, shortcuts and Start Menu all show the app icon.
+The script builds the program, then embeds the multi-size app icon into the EXE's Windows icon resources, so the tray, File Explorer, shortcuts and Start Menu all show the app icon.
 
 Quality checks:
 
@@ -72,8 +72,8 @@ Note: the `windows` crate is pinned to 0.58 (which uses `windows-targets` prebui
 | `src/exclusion.rs` | Foreground process detection (app exclusion) |
 | `src/monitor.rs` | Monitor enumeration |
 | `src/settings.rs` | JSON settings persistence |
-| `assets/logo-s.png` | Original logo artwork (the letter S) |
-| `assets/logo-s-64.bgra` | Tray icon pixel data embedded at compile time |
+| `assets/app-icon.png` | App icon artwork |
+| `assets/app-icon-64.bgra` | Tray icon pixel data embedded at compile time |
 | `assets/sue-paper.ico` | Multi-size Windows icon for File Explorer and Start Menu |
 | `src/bin/embed_icon.rs` | Resource tool that writes the ICO into the release EXE |
 
