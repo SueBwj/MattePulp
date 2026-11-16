@@ -4,17 +4,11 @@ The Mac app is a Swift/AppKit menu bar process. `build-macos.sh` runs the existi
 
 ## Build and run
 
-Use an Apple Silicon Mac, Rust stable and Xcode 16+ with Swift 6 and `swift-format`. The build targets macOS 12.0 or later; the local execution evidence below is for macOS 26.4.1 only. Intel and universal binaries are not produced.
+See the [main README](../README.en.md#macos-apple-silicon) for build and launch instructions. Local execution evidence below is for macOS 26.4.1 only; Intel and universal binaries are not produced.
 
-```sh
-./build-macos.sh /tmp/sue-paper-build
-./test-macos.sh /tmp/sue-paper-build
-open /tmp/sue-paper-build/Sue-Paper.app
-```
+`CARGO_TARGET_DIR` and `CLANG_MODULE_CACHE_PATH` can point to reusable build caches. The build applies only an ad-hoc integrity signature, verified with `codesign --verify --strict`. It does not use a signing identity, request certificates, notarize, publish, install to Applications, or add a login item. Downloaded copies may be blocked by Gatekeeper; this build does not bypass that protection. A distributable Developer ID/notarization process is separate work.
 
-Each build needs a fresh output directory. `CARGO_TARGET_DIR` and `CLANG_MODULE_CACHE_PATH` can point to reusable build caches. The result is `Sue-Paper.app` plus `sue-paper-macos-arm64.zip`. The build applies only an ad-hoc integrity signature, verified with `codesign --verify --strict`. It does not use a signing identity, request certificates, notarize, publish, install to Applications, or add a login item. Downloaded copies may be blocked by Gatekeeper; this build does not bypass that protection. A distributable Developer ID/notarization process is separate work.
-
-Click **S** for enabled state, texture, intensity, snooze, resume, frontmost-app exclusion and quit. An excluded app can be included again from that same menu while it is frontmost. Settings are atomically written to `~/Library/Application Support/Sue-Paper/settings.json`. If settings cannot be loaded, defaults are used with a menu error. A failed save leaves the current settings in effect and reports the failure in the menu. A file lock prevents two instances sharing the same settings directory. Snooze is intentionally session-only.
+Settings are atomically written. If they cannot be loaded, defaults are used with a menu error. A failed save leaves the current settings in effect and reports the failure in the menu. A file lock prevents two instances sharing the same settings directory. Snooze is intentionally session-only.
 
 For a short launch/exit check without writing normal user settings:
 

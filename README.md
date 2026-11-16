@@ -16,7 +16,7 @@ Sue-Paper 在整个屏幕上叠加一层程序生成的纸张纹理，柔化刺�
 
 轻量，且绝不碍事。
 
-- **一层看不见的纸。** 覆盖层运行在所有窗口之上、每一块屏幕。鼠标和键盘直接穿透，不抢焦点，不进 Alt-Tab——你感觉不到它，只看到纸。
+- **一层看不见的纸。** 每块屏幕都有覆盖层，鼠标和键盘直接穿透，不抢焦点，不出现在窗口切换中。macOS 上的显示范围限制见 [Mac 说明](macos/README.md#display-behavior)。
 - **挑一种纸。** 4 种程序生成纹理（分形噪声、无缝平铺，任意分辨率下颗粒都清晰），强度 15% / 20% / 25% / 30% 四档可调。
 - **它会自己让开。** 把看图、剪片、修图的应用加进排除列表，它们来到前台时纹理自动隐藏；也可以"打盹" 5 / 15 分钟，随时要回一块干净的屏幕。
 
@@ -47,7 +47,7 @@ Mac 产物是本地 Apple Silicon 构建，尚非已发布或经过公证的版�
 
 ### macOS（Apple Silicon）
 
-需要 Rust stable 和 Xcode 16 或更新版本，确保 `xcrun` 能找到 Swift 6 与 `swift-format`：
+需要 macOS 12 或更新版本、Rust stable 和 Xcode 16 或更新版本，确保 `xcrun` 能找到 Swift 6 与 `swift-format`：
 
 ```sh
 ./build-macos.sh /tmp/sue-paper-build

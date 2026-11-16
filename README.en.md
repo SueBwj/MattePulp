@@ -16,7 +16,7 @@ Sue-Paper lays a procedurally generated paper texture over your entire screen, s
 
 Lightweight, and designed to stay out of your way.
 
-- **An invisible sheet of paper.** The overlay runs above all your windows, across every monitor. Your cursor and keystrokes pass straight through — it never takes focus, never shows up in Alt-Tab. You won't notice it's there; you'll just see paper.
+- **An invisible sheet of paper.** Each monitor gets an overlay. Your cursor and keystrokes pass straight through; it never takes focus or appears in window switching. See the [Mac notes](macos/README.md#display-behavior) for display limitations.
 - **Pick your paper.** 4 procedurally generated textures (fractal noise, seamlessly tiled, grain stays crisp at any resolution), with 4 intensity levels: 15% / 20% / 25% / 30%.
 - **It steps aside on its own.** Add image viewers, editors or video players to the exclusion list and the texture hides itself whenever they come to the front. Or snooze it for 5 / 15 minutes whenever you want a clean screen.
 
@@ -47,7 +47,7 @@ The Mac package is a local Apple Silicon build, not a published or notarized rel
 
 ### macOS (Apple Silicon)
 
-Requires Rust stable and Xcode 16 or newer with Swift 6 and `swift-format` available through `xcrun`:
+Requires macOS 12 or newer, Rust stable and Xcode 16 or newer with Swift 6 and `swift-format` available through `xcrun`:
 
 ```sh
 ./build-macos.sh /tmp/sue-paper-build
