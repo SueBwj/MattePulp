@@ -4,7 +4,7 @@
 
 **Make your screen feel like paper.**
 
-Sue-Paper lays a procedurally generated paper texture over your entire screen, softening harsh highlights and contrast — turning your emissive display into a "digital matte paper". Native Windows, built with Rust + raw Win32, single-file and portable.
+Sue-Paper lays a procedurally generated paper texture over your entire screen, softening harsh highlights and contrast, turning your emissive display into a "digital matte paper". The portable Windows app uses Rust + raw Win32. The native Apple Silicon Mac app uses AppKit and the same Rust-generated textures.
 
 <p align="center">
   <img src="assets/showcase1.png" width="32%" alt="Reading showcase 1">
@@ -33,13 +33,31 @@ Lightweight, and designed to stay out of your way.
 
 ## Download & Usage
 
-Grab the zip from [Releases](https://github.com/SueBwj/sue-paper/releases), extract and run `sue-paper.exe`. That's it.
+**Windows:** Grab the zip from [Releases](https://github.com/SueBwj/sue-paper/releases), extract and run `sue-paper.exe`. That's it. The existing v0.1.0 Windows release is unchanged.
 
 Everything lives in the system tray right-click menu: on/off, texture, intensity, snooze, exclude the current foreground app, quit. Settings are persisted to `%APPDATA%/Sue-Paper/settings.json`.
 
-Footprint: ~22–27 MB of memory and 0% CPU at runtime (static texture, updated only when you change it). Multi-monitor support included — overlays rebuild automatically on display changes.
+Windows footprint: ~22–27 MB of memory and 0% CPU at runtime (static texture, updated only when you change it). Multi-monitor support included; overlays rebuild automatically on display changes.
+
+**macOS:** Build `Sue-Paper.app` using the instructions below, then open it and click **S** in the menu bar. The menu has on/off, the same four textures and strengths, 5/15-minute snooze, immediate resume, exclusion of the frontmost app (click again to include it), and quit. Settings live in `~/Library/Application Support/Sue-Paper/settings.json`; exclusions use bundle identifiers, with executable URLs as a fallback. The app requires no Accessibility or Screen Recording permission.
+
+The Mac package is a local Apple Silicon build, not a published or notarized release. See [Mac build and validation notes](macos/README.md) for the tested environment and remaining display/Spaces limitations.
 
 ## Build
+
+### macOS (Apple Silicon)
+
+Requires Rust stable and Xcode 16 or newer with Swift 6 and `swift-format` available through `xcrun`:
+
+```sh
+./build-macos.sh /tmp/sue-paper-build
+./test-macos.sh /tmp/sue-paper-build
+open /tmp/sue-paper-build/Sue-Paper.app
+```
+
+Use a fresh output directory for each build. Output includes `Sue-Paper.app` and `sue-paper-macos-arm64.zip`. Build tools are only needed to build; the app has no Rust runtime dependency. Quit from the **S** menu. Tests use temporary settings and synthetic windows, briefly entering fullscreen, then close them. They never capture the desktop.
+
+### Windows
 
 Requires a Rust stable toolchain (`stable-x86_64-pc-windows-gnu` or MSVC both work):
 
@@ -76,6 +94,9 @@ Note: the `windows` crate is pinned to 0.58 (which uses `windows-targets` prebui
 | `assets/logo-s-64.bgra` | Tray icon pixel data embedded at compile time |
 | `assets/sue-paper.ico` | Multi-size Windows icon for File Explorer and Start Menu |
 | `src/bin/embed_icon.rs` | Resource tool that writes the ICO into the release EXE |
+| `src/bin/export_textures.rs` | Exports the shared texture engine's 16 tiles for the Mac bundle |
+| `macos/` | Native AppKit menu bar, overlays, settings and behavioral tests |
+| `build-macos.sh`, `test-macos.sh` | Apple Silicon packaging and validation |
 
 ## Credits
 
