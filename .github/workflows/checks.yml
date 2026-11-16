@@ -1,0 +1,30 @@
+name: Checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust checks and Windows release build
+        shell: pwsh
+        run: |
+          cargo fmt -- --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo clippy --locked --all-targets -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked --all-targets
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./build-release.ps1
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build native Apple Silicon bundle
+        run: ./build-macos.sh "$RUNNER_TEMP/sue-paper-build"
+      - name: Shared texture and AppKit checks
+        run: ./test-macos.sh "$RUNNER_TEMP/sue-paper-build"
