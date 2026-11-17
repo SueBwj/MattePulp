@@ -66,7 +66,7 @@ open /tmp/sue-paper-build/Sue-Paper.app
 # 产物：target/release/sue-paper.exe
 ```
 
-脚本会先构建程序，再把多尺寸 `S` Logo 写入 EXE 的 Windows 图标资源，使托盘、文件管理器、快捷方式和开始菜单均显示应用图标。
+脚本会先构建程序，再把多尺寸应用图标写入 EXE 的 Windows 图标资源，使托盘、文件管理器、快捷方式和开始菜单均显示应用图标。
 
 质量检查：
 
@@ -90,8 +90,8 @@ cargo test --all-targets
 | `src/exclusion.rs` | 前台进程名检测（应用排除） |
 | `src/monitor.rs` | 显示器枚举 |
 | `src/settings.rs` | JSON 设置持久化 |
-| `assets/logo-s.png` | Logo 原图（仅含大写字母 S） |
-| `assets/logo-s-64.bgra` | 编译期内嵌的托盘图标像素资源 |
+| `assets/app-icon.png` | 应用图标原图 |
+| `assets/app-icon-64.bgra` | 编译期内嵌的托盘图标像素资源 |
 | `assets/sue-paper.ico` | 文件管理器与开始菜单使用的多尺寸 Windows 图标 |
 | `src/bin/embed_icon.rs` | 将 ICO 写入 release EXE 的资源工具 |
 | `src/bin/export_textures.rs` | 从共享纹理引擎导出 Mac 所需的 16 组纹理 |
