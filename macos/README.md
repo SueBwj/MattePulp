@@ -1,6 +1,6 @@
 # Native Mac build
 
-The Mac app is a Swift/AppKit menu bar process. `build-macos.sh` runs the existing Rust texture engine to generate all four textures at 15%, 20%, 25% and 30%, then bundles those premultiplied BGRA tiles. There is one texture algorithm, in `src/texture.rs`. The translucent paper artwork supplies the app icon, and the native menu bar uses a readable S in the system text color.
+The Mac app is a Swift/AppKit menu bar process. `build-macos.sh` runs the existing Rust texture engine to generate all four textures at 15%, 20%, 25% and 30%, then bundles those premultiplied BGRA tiles. There is one texture algorithm, in `src/texture.rs`. The translucent paper artwork supplies the app icon, and the native menu bar uses a readable S in the system text color. The menu itself is either Simplified Chinese or English. A saved `language` value of `zh-Hans` or `en` is reopened from settings; a file with no language follows the system UI language, and anything other than Simplified Chinese uses English. Intensity remains 15, 20, 25, and 30. The bundle display name is MattePulp. The executable name stays `Sue-Paper`. The same build copies `LICENSE` into `Contents/Resources`. That MIT text covers repository source and documentation. It does not license the icon, screenshots, or other media.
 
 ## Build and run
 

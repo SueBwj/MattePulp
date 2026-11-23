@@ -11,6 +11,7 @@ use windows::Win32::Storage::FileSystem::{
     MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
 };
 
+use crate::locale::{self, Language};
 use crate::texture::TextureKind;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,6 +23,14 @@ pub struct Settings {
     pub intensity: u32,
     /// 排除列表：进程可执行文件名（小写），如 "photoshop.exe"
     pub exclusions: Vec<String>,
+    /// 用户选定的界面语言。缺省时跟随系统 UI 语言。
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "locale::serialize_language",
+        deserialize_with = "locale::deserialize_language"
+    )]
+    pub language: Option<Language>,
 }
 
 impl Default for Settings {
@@ -31,6 +40,7 @@ impl Default for Settings {
             texture: TextureKind::ClassicMatte,
             intensity: 20,
             exclusions: Vec::new(),
+            language: None,
         }
     }
 }
@@ -128,6 +138,7 @@ fn save_to_path(path: &Path, settings: &Settings) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::locale::Language;
 
     #[test]
     fn missing_fields_use_defaults() {
@@ -135,6 +146,7 @@ mod tests {
         assert!(!settings.enabled);
         assert_eq!(settings.texture, TextureKind::ClassicMatte);
         assert_eq!(settings.intensity, 20);
+        assert_eq!(settings.language, None);
     }
 
     #[test]
@@ -142,11 +154,43 @@ mod tests {
         let settings = Settings {
             intensity: 99,
             exclusions: vec![" Foo.EXE ".into(), "foo.exe".into(), "".into()],
+            language: Some(Language::En),
             ..Settings::default()
         }
         .normalized();
         assert_eq!(settings.intensity, 20);
         assert_eq!(settings.exclusions, ["foo.exe"]);
+        assert_eq!(settings.language, Some(Language::En));
+    }
+
+    #[test]
+    fn language_choice_is_saved_and_unknown_values_do_not_reset_other_fields() {
+        let chosen = Settings {
+            enabled: false,
+            intensity: 30,
+            language: Some(Language::ZhHans),
+            ..Settings::default()
+        };
+        let json = serde_json::to_string(&chosen).unwrap();
+        assert!(json.contains("\"language\":\"zh-Hans\""));
+        let loaded: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded, chosen);
+
+        let legacy = r#"{"enabled":false,"texture":"Parchment","intensity":25}"#;
+        let old: Settings = serde_json::from_str(legacy).unwrap();
+        assert!(!old.enabled);
+        assert_eq!(old.texture, TextureKind::Parchment);
+        assert_eq!(old.intensity, 25);
+        assert_eq!(old.language, None);
+
+        let unknown = r#"{"enabled":false,"intensity":15,"language":"zh-Hant"}"#;
+        let fallback: Settings = serde_json::from_str(unknown).unwrap();
+        assert!(!fallback.enabled);
+        assert_eq!(fallback.intensity, 15);
+        assert_eq!(fallback.language, None);
+        assert!(!serde_json::to_string(&Settings::default())
+            .unwrap()
+            .contains("language"));
     }
 
     #[test]

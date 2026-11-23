@@ -2,11 +2,16 @@
 name = "sue-paper"
 version = "0.1.0"
 edition = "2021"
-description = "Sue-Paper - digital matte paper texture overlay for Windows"
+authors = ["SueBwj"]
+description = "MattePulp (柔纸): paper-texture overlay"
+license = "MIT"
+repository = "https://github.com/SueBwj/sue-paper"
+readme = "README.md"
 
 [dependencies]
 windows = { version = "0.58", features = [
     "Win32_Foundation",
+    "Win32_Globalization",
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Shell",
     "Win32_UI_HiDpi",

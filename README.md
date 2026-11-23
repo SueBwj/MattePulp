@@ -1,74 +1,87 @@
-# Sue-Paper
+# 柔纸
 
 **中文** | [English](README.en.md)
 
-**让你的屏幕摸起来像纸。**
-
-Sue-Paper 在整个屏幕上叠加一层程序生成的纸张纹理，柔化刺眼的高亮与对比度，把发光的屏幕变成一张"数字哑光纸"。Windows 版采用 Rust + Win32，单文件免安装；Apple Silicon Mac 版采用原生 AppKit，复用同一个 Rust 纹理引擎。
-
 <p align="center">
-  <img src="assets/showcase1.png" width="32%" alt="阅读效果 1">
-  <img src="assets/showcase2.png" width="32%" alt="阅读效果 2">
-  <img src="assets/showcase3.png" width="32%" alt="阅读效果 3">
+  <img src="assets/app-icon.png" width="128" alt="柔纸图标：深蓝底上两张交叠的半透明纸">
 </p>
 
-## 工作原理
+**柔纸在屏幕上铺一层生成的纸纹，让发亮的显示看起来像一张哑光纸。**
 
-轻量，且绝不碍事。
+英文产品名是 MattePulp。仓库、Windows 可执行文件和 Mac 应用包仍叫 sue-paper，已有的下载地址、设置目录和纹理编号都不变。Windows 版是免安装的托盘程序。Mac 版是 Apple Silicon 上的原生菜单栏程序。两边共用同一套纹理算法。
 
-- **一层看不见的纸。** 每块屏幕都有覆盖层，鼠标和键盘直接穿透，不抢焦点，不出现在窗口切换中。macOS 上的显示范围限制见 [Mac 说明](macos/README.md#display-behavior)。
-- **挑一种纸。** 4 种程序生成纹理（分形噪声、无缝平铺，任意分辨率下颗粒都清晰），强度 15% / 20% / 25% / 30% 四档可调。
-- **它会自己让开。** 把看图、剪片、修图的应用加进排除列表，它们来到前台时纹理自动隐藏；也可以"打盹" 5 / 15 分钟，随时要回一块干净的屏幕。
+<p align="center">
+  <img src="assets/showcase1.png" width="32%" alt="阅读页面上的纸纹。页面文字是第三方作品。">
+  <img src="assets/showcase2.png" width="32%" alt="同一阅读页面，其中一段被高亮。这些文字不属于柔纸。">
+  <img src="assets/showcase3.png" width="32%" alt="阅读视图的后一页，纸纹仍盖在页面上。">
+</p>
 
-## 四种纹理
+图里的正文是第三方作品。柔纸只加上纸纹，不主张这些文字或阅读应用的权利。
 
-![四种纹理](showcase/textures.png)
+## 下载
 
-| 纹理 | 气质 |
-|---|---|
-| Classic Matte | 干净柔和的哑光面，适合专注阅读 |
-| Whisper Weave | 细腻织物纹理，柔化亮色应用 |
-| Sunbaked Parchment | 暖琥珀色厚颗粒，适合夜晚写作 |
-| Vellum Mist | 半透明薄雾，适合长时间阅读 |
+先下载已发布的安装包。下面的源码功能还没有打进这些安装包。
 
-## 下载与使用
+| 系统 | 版本 | 文件 |
+|---|---|---|
+| Windows x64 | [v0.1.0](https://github.com/SueBwj/sue-paper/releases/tag/v0.1.0) 稳定版 | [sue-paper-v0.1.0-windows-x64.zip](https://github.com/SueBwj/sue-paper/releases/download/v0.1.0/sue-paper-v0.1.0-windows-x64.zip) |
+| Mac Apple Silicon | [v0.1.1-macos.1](https://github.com/SueBwj/sue-paper/releases/tag/v0.1.1-macos.1) 预发布 | [Sue-Paper-macOS-arm64-local-d9fb2c7.dmg](https://github.com/SueBwj/sue-paper/releases/download/v0.1.1-macos.1/Sue-Paper-macOS-arm64-local-d9fb2c7.dmg) |
 
-**Windows：** 从 [Releases](https://github.com/SueBwj/sue-paper/releases) 下载 zip，解压后运行 `sue-paper.exe` 即可。现有 v0.1.0 Windows 发布不变。
+Windows v0.1.0 对应提交 `53b266a`。那个包里的程序名叫 Sue-Paper，托盘图标来自当时的 `assets/logo-s-64.bgra`，没有语言菜单，也没有现在这张半透明纸图标。
 
-一切操作都在系统托盘右键菜单里：开关、纹理、强度、打盹、排除当前前台应用、退出。设置自动保存在 `%APPDATA%/Sue-Paper/settings.json`。
+Mac 预发布对应提交 `d9fb2c7`，只含 Apple Silicon。磁盘镜像里已经是这张半透明纸图标。菜单仍把中文和英文写在同一项上，没有单独的语言选择，也没有公证。Gatekeeper 可能拦住从网络下载的副本。
 
-Windows 资源占用：内存约 22–27 MB，运行时 0% CPU（静态纹理，仅切换时更新一次）。支持多显示器，显示变化时自动重建覆盖层。
+当前源码里，Windows 托盘和 Mac 菜单栏都会显示柔纸或 MattePulp，并提供单独的语言菜单。这套界面还没有新的安装包。Mac 菜单栏记号仍是 S，强度仍是四档。
 
-**macOS：** 按下方步骤构建并打开 `Sue-Paper.app`，点击菜单栏的 **S**。菜单提供开关、四种纹理与四档强度、打盹 5/15 分钟、立即恢复、排除当前前台应用（再次点击可取消排除）和退出。设置保存在 `~/Library/Application Support/Sue-Paper/settings.json`；排除项使用应用 bundle identifier，无标识时使用可执行文件 URL。无需辅助功能或屏幕录制权限。
+## 使用
 
-Mac 产物是本地 Apple Silicon 构建，尚非已发布或经过公证的版本。已验证环境及显示器、Spaces 的测试边界见 [Mac 构建与验证说明](macos/README.md)。
+纸纹盖住每块屏幕，鼠标和键盘直接穿过，不拿焦点，也不出现在窗口切换里。Mac 的显示范围见 [Mac 说明](macos/README.md#display-behavior)。
 
-## 构建
+四种纹理由分形噪声生成，可以无缝平铺。Windows 强度仍是 15%、20%、25%、30% 四档。设置里的纹理编号不变。
 
-### macOS（Apple Silicon）
+| 设置编号 | 英文菜单 | 中文菜单 | 观感 |
+|---|---|---|---|
+| ClassicMatte | Classic Matte | 经典哑光 | 干净、柔和，适合阅读 |
+| WhisperWeave | Whisper Weave | 织物纹理 | 细密织纹，压住刺眼的亮色 |
+| Parchment | Sunbaked Parchment | 羊皮纸 | 暖色，颗粒更重 |
+| VellumMist | Vellum Mist | 薄纱雾面 | 很轻的一层雾 |
 
-需要 macOS 12 或更新版本、Rust stable 和 Xcode 16 或更新版本，确保 `xcrun` 能找到 Swift 6 与 `swift-format`：
+![四种纹理盖在同一组横线上](showcase/textures.png)
 
-```sh
-./build-macos.sh /tmp/sue-paper-build
-./test-macos.sh /tmp/sue-paper-build
-open /tmp/sue-paper-build/Sue-Paper.app
-```
+**Windows。** 解压稳定包后运行 `sue-paper.exe`。从这棵源码编译时，右键托盘图标。菜单每次打开都按同一种语言重建：
 
-每次构建使用新的输出目录。产物包括 `Sue-Paper.app` 和 `sue-paper-macos-arm64.zip`；运行应用不需要 Rust 工具链。从 **S** 菜单退出。测试只使用临时设置和合成窗口，会短暂进入全屏并自动关闭，不截取桌面内容。
+- 启用纸张纹理
+- 纹理、强度、打盹（暂停 5 分钟或 15 分钟）
+- 排除当前应用。排除项是前台进程的文件名，例如 `photos.exe`
+- 语言：中文或 English
+- 退出
+
+托盘提示和隐藏窗口标题在中文下是「柔纸」，在英文下是 MattePulp。选择语言后提示立即更换，下一次打开的菜单整份换成该语言。语言名本身保持「中文」和 English，方便从另一份菜单里找回来。
+
+没有 `language` 字段的旧设置仍可打开。这时跟随 Windows 界面语言：`zh-Hans`、`zh-CN`、`zh-SG`、`zh-CHS` 用简体中文，繁体中文和其他语言用英文。选定后写入 `language`，值为 `zh-Hans` 或 `en`，下次启动继续用它。设置文件仍在 `%APPDATA%\Sue-Paper\settings.json`。
+
+**Mac。** 已发布的磁盘镜像仍是上面的混合语言菜单。从这棵源码构建 `Sue-Paper.app` 后，点菜单栏上的 **S**。菜单每次打开都只用一种语言：启用纸张纹理、纹理、强度、语言、打盹 5 或 15 分钟、排除或取消排除、退出柔纸。打盹中会多出「立即恢复」。强度仍是 15%、20%、25%、30%。没有 `language` 字段时跟随系统界面语言，规则与 Windows 相同；选定后写入同一个 `language` 值。菜单栏提示和辅助功能名称会立即换成柔纸或 MattePulp，记号仍是 S。排除项使用 bundle identifier，没有标识时用可执行文件 URL。不需要辅助功能或屏幕录制权限。设置仍在 `~/Library/Application Support/Sue-Paper/settings.json`。Finder 里的显示名是 MattePulp，可执行文件名仍是 `Sue-Paper`。
+
+## 兼容性
+
+- Windows 已发布包是 64 位。旧的 `settings.json` 没有语言字段也能加载。强度档位没有改。
+- Mac 已发布包是 Apple Silicon，系统要求 macOS 12 或更新版本。v0.1.1-macos.1 只做了 ad-hoc 签名，没有公证。
+- 包标识仍是 `com.suebwj.sue-paper`。Mac 可执行文件名仍是 `Sue-Paper`。Windows 可执行文件名仍是 `sue-paper.exe`。
+- 运行时大约占用 22–27 MB 内存。纹理静止时不再耗 CPU，只有切换时重画。多显示器在显示变化时重建覆盖层。这是既有 Windows 程序的占用情况。
+
+## 构建与测试
 
 ### Windows
 
-需要 Rust stable 工具链（`stable-x86_64-pc-windows-gnu` 或 msvc 均可）：
+需要 Rust stable（`stable-x86_64-pc-windows-gnu` 或 MSVC）：
 
 ```sh
 ./build-release.ps1
-# 产物：target/release/sue-paper.exe
 ```
 
-脚本会先构建程序，再把多尺寸应用图标写入 EXE 的 Windows 图标资源，使托盘、文件管理器、快捷方式和开始菜单均显示应用图标。
+脚本生成 `target/release/sue-paper.exe`，把 `assets/sue-paper.ico` 写进可执行文件的图标资源，并把仓库根目录的 `LICENSE` 复制到可执行文件旁边。分发时请带上这个 `LICENSE`，不要把整个 `target\release` 目录打进去。托盘像素来自编译期内嵌的 `assets/app-icon-64.bgra`。这三份图标都是当前的半透明纸图，不是 v0.1.0 里的旧图标。
 
-质量检查：
+Windows 上的格式、静态检查和测试：
 
 ```sh
 cargo fmt -- --check
@@ -76,34 +89,46 @@ cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
 ```
 
-注意：`windows` crate 固定为 0.58（使用 `windows-targets` 预编译导入库）。
-0.60+ 改用 `windows-link` 在构建期调用 dlltool 生成导入库，GNU 工具链下需额外配置 PATH，故未采用。
+`windows` crate 固定为 0.58，使用 `windows-targets` 里预编译的导入库。0.60 及以后改为构建时用 `windows-link` 调用 dlltool，GNU 工具链还要额外配置 PATH，因此没有升级。
 
-## 结构
+### macOS（Apple Silicon）
+
+需要 macOS 12 或更新版本、Rust stable，以及 Xcode 16 或更新版本，并且 `xcrun` 能找到 Swift 6 和 `swift-format`：
+
+```sh
+./build-macos.sh /tmp/sue-paper-build
+./test-macos.sh /tmp/sue-paper-build
+open /tmp/sue-paper-build/Sue-Paper.app
+```
+
+每次构建使用新的输出目录。产物是 `Sue-Paper.app` 和 `sue-paper-macos-arm64.zip`。脚本把 `LICENSE` 放进 `Contents/Resources`，再做 ad-hoc 签名。运行应用不需要 Rust。从 **S** 菜单退出。测试只用临时设置和合成窗口，会短暂进入全屏并自动关掉，不截取桌面。已验证的环境和显示器、Spaces 的边界见 [Mac 构建与验证说明](macos/README.md)。
 
 | 文件 | 职责 |
 |---|---|
-| `src/main.rs` | 入口、隐藏 control 窗口、消息循环、定时器调度、菜单命令分发 |
-| `src/overlay.rs` | 分层覆盖窗口（每屏一个）+ `UpdateLayeredWindow` 上屏 |
-| `src/texture.rs` | 分形噪声纹理生成 + 4 种预设 |
-| `src/tray.rs` | 托盘图标 + 右键菜单 |
-| `src/exclusion.rs` | 前台进程名检测（应用排除） |
-| `src/monitor.rs` | 显示器枚举 |
-| `src/settings.rs` | JSON 设置持久化 |
-| `assets/app-icon.png` | 应用图标原图 |
-| `assets/app-icon-64.bgra` | 编译期内嵌的托盘图标像素资源 |
-| `assets/sue-paper.ico` | 文件管理器与开始菜单使用的多尺寸 Windows 图标 |
-| `src/bin/embed_icon.rs` | 将 ICO 写入 release EXE 的资源工具 |
-| `src/bin/export_textures.rs` | 从共享纹理引擎导出 Mac 所需的 16 组纹理 |
-| `macos/` | 原生 AppKit 菜单栏、覆盖层、设置和行为测试 |
-| `build-macos.sh`、`test-macos.sh` | Apple Silicon 打包与验证 |
+| `src/main.rs` | 入口、隐藏控制窗口、消息循环、菜单命令 |
+| `src/locale.rs` | 简体中文和英文菜单，以及系统语言判断 |
+| `src/overlay.rs` | 每屏一个分层窗口，并用 `UpdateLayeredWindow` 上屏 |
+| `src/texture.rs` | 分形噪声和四种纹理 |
+| `src/tray.rs` | 托盘图标和右键菜单 |
+| `src/settings.rs` | `%APPDATA%/Sue-Paper/settings.json` |
+| `assets/app-icon.png` | 图标原图 |
+| `assets/app-icon-64.bgra` | 编进托盘图标的像素 |
+| `assets/sue-paper.ico` | 写进 Windows 可执行文件的多尺寸图标 |
+| `macos/` | AppKit 菜单栏、覆盖层、设置和测试 |
 
-## 致谢与说明
+## 反馈
 
-- 灵感来自 [Paperman](https://paperman.cc) —— 数字哑光表面的开创者。
-- 本项目是 **Vibe Coding** 的产物：从想法到上线的全部代码由人类与 AI 编程助手协作完成，凭感觉快速迭代，边用边改。
+问题请开到 [GitHub Issues](https://github.com/SueBwj/sue-paper/issues)。源码仓库是 [SueBwj/sue-paper](https://github.com/SueBwj/sue-paper)。
 
-## 未实现（可作为后续迭代）
+## 致谢
 
-- 昼夜节律 / 定时自动开关
-- 开机自启动、按显示器选择启用
+- 数字哑光表面这个想法来自 [Paperman](https://paperman.cc)。
+- 程序由 SueBwj 与编程助手一起写成。
+
+## 许可
+
+仓库里的源码和文档使用 MIT 许可，版权行为 `Copyright (c) 2026 SueBwj`。全文见 [LICENSE](LICENSE)。
+
+这次许可不覆盖截图、应用图标、产品标识和其他媒体，也不改变第三方依赖自带的许可。`windows`、`serde` 和 `serde_json` 仍使用它们各自发布的许可。
+
+再分发程序时，请保留上述版权声明和许可声明。Windows 构建脚本把 `LICENSE` 放在 `sue-paper.exe` 旁边。Mac 构建脚本把它放进应用包的 `Contents/Resources`。

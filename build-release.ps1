@@ -19,4 +19,8 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $cargo run --release --bin embed_icon -- $executable $icon
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-Write-Host "Built Sue-Paper with embedded icon: $executable"
+$license = Join-Path $projectRoot "LICENSE"
+Copy-Item -LiteralPath $license -Destination (Join-Path (Split-Path -Parent $executable) "LICENSE") -Force
+
+Write-Host "Built sue-paper.exe with embedded icon: $executable"
+Write-Host "License notice beside the executable: $(Join-Path (Split-Path -Parent $executable) 'LICENSE')"

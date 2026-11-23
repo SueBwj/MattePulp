@@ -11,7 +11,7 @@ final class AppController: NSObject, NSMenuDelegate {
   private(set) var visibility = Visibility()
   private(set) var overlays: [Overlay] = []
   private(set) var statusItem: NSStatusItem?
-  private(set) var lastError: String?
+  private(set) var lastError: MenuNotice?
   private var lock: Int32 = -1
   private var observers: [(NotificationCenter, NSObjectProtocol)] = []
   private var snoozeTimer: Timer?
@@ -38,14 +38,12 @@ final class AppController: NSObject, NSMenuDelegate {
       throw error == EWOULDBLOCK ? StartupError.alreadyRunning : StartupError.lockUnavailable
     }
     do { settings = try Settings.load(from: settingsURL) } catch {
-      record(error, context: "Could not load settings; using defaults")
+      record(error, notice: .loadFailed)
     }
     try rebuildOverlays()
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     statusItem?.button?.title = "S"
-    statusItem?.button?.toolTip = "Sue-Paper"
-    statusItem?.button?.setAccessibilityLabel("Sue-Paper")
-    let menu = NSMenu(title: "Sue-Paper")
+    let menu = NSMenu()
     menu.delegate = self
     statusItem?.menu = menu
     menuNeedsUpdate(menu)
@@ -53,7 +51,7 @@ final class AppController: NSObject, NSMenuDelegate {
 
     observe(.default, NSApplication.didChangeScreenParametersNotification) { controller, _ in
       do { try controller.rebuildOverlays() } catch {
-        controller.record(error, context: "Could not update displays")
+        controller.record(error, notice: .displaysFailed)
       }
     }
     let workspace = NSWorkspace.shared.notificationCenter
@@ -112,10 +110,16 @@ final class AppController: NSObject, NSMenuDelegate {
     statusItem?.button?.appearsDisabled = !visible
   }
 
-  private func record(_ error: Error, context: String) {
-    lastError = context
+  private func record(_ error: Error, notice: MenuNotice) {
+    lastError = notice
     // Avoid logging app identities, paths, or other desktop metadata.
-    fputs("Sue-Paper: \(context) (\((error as NSError).code))\n", stderr)
+    fputs("Sue-Paper: \(notice.logSummary) (\((error as NSError).code))\n", stderr)
+  }
+
+  private func refreshChrome(_ text: MenuText) {
+    statusItem?.button?.toolTip = text.product
+    statusItem?.button?.setAccessibilityLabel(text.product)
+    statusItem?.menu?.title = text.product
   }
 
   private func change(_ updated: Settings) {
@@ -125,8 +129,9 @@ final class AppController: NSObject, NSMenuDelegate {
       settings = updated
       for overlay in overlays { (overlay.contentView as? TextureView)?.image = image }
       lastError = nil
+      refreshChrome(MenuText.resolved(saved: settings.language))
       applyVisibility()
-    } catch { record(error, context: "Change not saved; check settings storage and app resources") }
+    } catch { record(error, notice: .saveFailed) }
   }
 
   @objc func toggle() {
@@ -180,59 +185,83 @@ final class AppController: NSObject, NSMenuDelegate {
     change(updated)
   }
 
+  @objc func selectLanguage(_ item: NSMenuItem) {
+    guard let raw = item.representedObject as? String, AppLanguage(rawValue: raw) != nil else {
+      return
+    }
+    var updated = settings
+    guard updated.language != raw else { return }
+    updated.language = raw
+    change(updated)
+  }
+
   @objc func quit() { NSApp.terminate(nil) }
 
   func menuNeedsUpdate(_ menu: NSMenu) {
     menu.removeAllItems()
+    let text = MenuText.resolved(saved: settings.language)
+    refreshChrome(text)
     let foreground = NSWorkspace.shared.frontmostApplication
     menuForeground =
       foreground?.processIdentifier == ProcessInfo.processInfo.processIdentifier
       ? nil : Self.identity(foreground)
     func item(
       _ title: String, _ action: Selector?, tag: Int = 0,
-      checked: Bool = false, parent: NSMenu? = nil
+      checked: Bool = false, represented: String? = nil, parent: NSMenu? = nil
     ) {
       let entry = NSMenuItem(title: title, action: action, keyEquivalent: "")
       entry.target = self
       entry.tag = tag
       entry.state = checked ? .on : .off
+      entry.representedObject = represented
+      entry.setAccessibilityLabel(title)
       (parent ?? menu).addItem(entry)
     }
-    item("启用 Enabled", #selector(toggle), checked: settings.enabled)
-    let textureMenu = NSMenu(title: "纸张 Texture")
+    func submenu(_ title: String, _ child: NSMenu) {
+      let entry = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+      entry.submenu = child
+      entry.setAccessibilityLabel(title)
+      menu.addItem(entry)
+    }
+    item(text.toggle, #selector(toggle), checked: settings.enabled)
+    let textureMenu = NSMenu(title: text.textureMenu)
     for (index, texture) in textures.catalog.enumerated() {
       item(
-        texture.name, #selector(selectTexture(_:)), tag: index,
+        MenuText.textureTitle(id: texture.id, language: text.language),
+        #selector(selectTexture(_:)), tag: index,
         checked: texture.id == settings.texture, parent: textureMenu)
     }
-    let textureItem = NSMenuItem(title: textureMenu.title, action: nil, keyEquivalent: "")
-    textureItem.submenu = textureMenu
-    menu.addItem(textureItem)
-    let intensityMenu = NSMenu(title: "强度 Intensity")
-    for intensity in Settings.intensities {
+    submenu(text.textureMenu, textureMenu)
+    let intensityMenu = NSMenu(title: text.intensityMenu)
+    for (label, intensity) in zip(text.intensities, Settings.intensities) {
       item(
-        "\(intensity)%", #selector(selectIntensity(_:)), tag: intensity,
+        label, #selector(selectIntensity(_:)), tag: intensity,
         checked: intensity == settings.intensity, parent: intensityMenu)
     }
-    let intensityItem = NSMenuItem(title: intensityMenu.title, action: nil, keyEquivalent: "")
-    intensityItem.submenu = intensityMenu
-    menu.addItem(intensityItem)
+    submenu(text.intensityMenu, intensityMenu)
+    let languageMenu = NSMenu(title: text.languageMenu)
+    for choice in [AppLanguage.zhHans, AppLanguage.en] {
+      item(
+        choice.menuTitle, #selector(selectLanguage(_:)),
+        checked: text.language == choice, represented: choice.rawValue, parent: languageMenu)
+    }
+    submenu(text.languageMenu, languageMenu)
     menu.addItem(.separator())
-    item("打盹 5 分钟 / Snooze 5 minutes", #selector(snooze(_:)), tag: 5)
-    item("打盹 15 分钟 / Snooze 15 minutes", #selector(snooze(_:)), tag: 15)
+    item(text.snooze5, #selector(snooze(_:)), tag: 5)
+    item(text.snooze15, #selector(snooze(_:)), tag: 15)
     if visibility.snoozeUntil.map({ $0 > Date() }) == true {
-      item("恢复 Resume now", #selector(resume))
+      item(text.resume, #selector(resume))
     }
     if let identity = menuForeground {
       let excluded = settings.exclusions.contains(identity)
-      let name = foreground?.localizedName ?? "current app"
+      let name = foreground?.localizedName ?? text.unnamedApp
       item(
-        excluded ? "取消排除 / Include \(name)" : "排除 / Exclude \(name)",
+        text.exclusionTitle(name: name, excluded: excluded),
         #selector(toggleExclusion), checked: excluded)
     }
-    if let lastError { item(lastError, nil) }
+    if let lastError { item(text.notice(lastError), nil) }
     menu.addItem(.separator())
-    item("退出 Quit Sue-Paper", #selector(quit))
+    item(text.quit, #selector(quit))
   }
 
   func shutdown() {
