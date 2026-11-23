@@ -188,6 +188,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn mac_catalog_names_remain_bilingual() {
+        assert_eq!(
+            KIND_NAMES,
+            [
+                "Classic Matte 经典哑光",
+                "Whisper Weave 织物纹理",
+                "Sunbaked Parchment 羊皮纸",
+                "Vellum Mist 薄纱雾面",
+            ]
+        );
+    }
+
+    #[test]
     fn generated_tiles_are_deterministic_and_premultiplied() {
         for kind in KINDS {
             let first = generate_tile(kind, 20);

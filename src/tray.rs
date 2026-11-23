@@ -9,11 +9,7 @@ use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use crate::texture::KIND_NAMES;
-use crate::{
-    ID_EXCLUDE, ID_EXIT, ID_INT_BASE, ID_SNOOZE_15, ID_SNOOZE_5, ID_TEX_BASE, ID_TOGGLE,
-    INTENSITIES,
-};
+use crate::locale::{menu_model, Language, MenuNode};
 
 pub const WM_TRAY: u32 = WM_APP + 1;
 const TRAY_UID: u32 = 1;
@@ -73,6 +69,7 @@ pub unsafe fn create_control_window(
     wndproc: WNDPROC,
     icon: HICON,
     hinst: HINSTANCE,
+    title: &str,
 ) -> windows::core::Result<HWND> {
     let wc = WNDCLASSEXW {
         cbSize: size_of::<WNDCLASSEXW>() as u32,
@@ -86,10 +83,11 @@ pub unsafe fn create_control_window(
     if RegisterClassExW(&wc) == 0 {
         return Err(windows::core::Error::from_win32());
     }
+    let title = wide(title);
     CreateWindowExW(
         WINDOW_EX_STYLE::default(),
         CONTROL_CLASS,
-        w!("Sue-Paper"),
+        PCWSTR(title.as_ptr()),
         WS_OVERLAPPED,
         0,
         0,
@@ -102,11 +100,34 @@ pub unsafe fn create_control_window(
     )
 }
 
-pub unsafe fn add_icon(hwnd: HWND, hicon: HICON) -> windows::core::Result<()> {
-    let mut tip = [0u16; 128];
-    let tip_text = wide("Sue-Paper 纸张质感");
+fn copy_tip(tip: &mut [u16; 128], tip_text: &str) {
+    let tip_text = wide(tip_text);
     let n = tip_text.len().min(127);
     tip[..n].copy_from_slice(&tip_text[..n]);
+}
+
+pub unsafe fn set_window_title(hwnd: HWND, title: &str) {
+    let title = wide(title);
+    let _ = SetWindowTextW(hwnd, PCWSTR(title.as_ptr()));
+}
+
+pub unsafe fn set_tray_tip(hwnd: HWND, tip_text: &str) {
+    let mut tip = [0u16; 128];
+    copy_tip(&mut tip, tip_text);
+    let nid = NOTIFYICONDATAW {
+        cbSize: size_of::<NOTIFYICONDATAW>() as u32,
+        hWnd: hwnd,
+        uID: TRAY_UID,
+        uFlags: NIF_TIP,
+        szTip: tip,
+        ..Default::default()
+    };
+    let _ = Shell_NotifyIconW(NIM_MODIFY, &nid);
+}
+
+pub unsafe fn add_icon(hwnd: HWND, hicon: HICON, tip_text: &str) -> windows::core::Result<()> {
+    let mut tip = [0u16; 128];
+    copy_tip(&mut tip, tip_text);
     let nid = NOTIFYICONDATAW {
         cbSize: size_of::<NOTIFYICONDATAW>() as u32,
         hWnd: hwnd,
@@ -141,6 +162,30 @@ pub unsafe fn remove_icon(hwnd: HWND) {
     let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
 }
 
+unsafe fn fill_menu(menu: HMENU, nodes: &[MenuNode]) {
+    for node in nodes {
+        match node {
+            MenuNode::Separator => {
+                let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
+            }
+            MenuNode::Command {
+                id,
+                label,
+                checked,
+                enabled,
+            } => append(menu, *id, label, *checked, !*enabled),
+            MenuNode::Submenu { label, items } => {
+                let Ok(sub) = CreatePopupMenu() else {
+                    continue;
+                };
+                fill_menu(sub, items);
+                let label = wide(label);
+                let _ = AppendMenuW(menu, MF_POPUP, sub.0 as usize, PCWSTR(label.as_ptr()));
+            }
+        }
+    }
+}
+
 fn append(menu: HMENU, id: u16, text: &str, checked: bool, grayed: bool) {
     let text = wide(text);
     let mut flags = MF_STRING;
@@ -157,76 +202,23 @@ fn append(menu: HMENU, id: u16, text: &str, checked: bool, grayed: bool) {
 
 /// 弹出托盘菜单，返回用户选择的命令 ID（0 = 未选择）。
 /// fg_name 必须在弹菜单之前捕获（弹菜单会把前台切到本进程）。
+/// 每次弹出都按当前语言整表重建，避免中英标签混在同一菜单里。
 pub unsafe fn show_menu(
     owner: HWND,
     enabled: bool,
     tex_idx: usize,
     int_idx: usize,
     fg_name: Option<&str>,
+    language: Language,
 ) -> u32 {
     let menu = match CreatePopupMenu() {
         Ok(m) => m,
         Err(_) => return 0,
     };
-
-    append(
+    fill_menu(
         menu,
-        ID_TOGGLE,
-        if enabled {
-            "✔ 启用纸张纹理"
-        } else {
-            "　启用纸张纹理"
-        },
-        enabled,
-        false,
+        &menu_model(language, enabled, tex_idx, int_idx, fg_name),
     );
-    let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-
-    // 纹理子菜单
-    if let Ok(sub) = CreatePopupMenu() {
-        for (i, name) in KIND_NAMES.iter().enumerate() {
-            append(sub, ID_TEX_BASE + i as u16, name, i == tex_idx, false);
-        }
-        let label = wide("纹理");
-        let _ = AppendMenuW(menu, MF_POPUP, sub.0 as usize, PCWSTR(label.as_ptr()));
-    }
-
-    // 强度子菜单
-    if let Ok(sub) = CreatePopupMenu() {
-        for (i, v) in INTENSITIES.iter().enumerate() {
-            append(
-                sub,
-                ID_INT_BASE + i as u16,
-                &format!("{v}%"),
-                i == int_idx,
-                false,
-            );
-        }
-        let label = wide("强度");
-        let _ = AppendMenuW(menu, MF_POPUP, sub.0 as usize, PCWSTR(label.as_ptr()));
-    }
-
-    // 打盹子菜单
-    if let Ok(sub) = CreatePopupMenu() {
-        append(sub, ID_SNOOZE_5, "暂停 5 分钟", false, false);
-        append(sub, ID_SNOOZE_15, "暂停 15 分钟", false, false);
-        let label = wide("打盹");
-        let _ = AppendMenuW(menu, MF_POPUP, sub.0 as usize, PCWSTR(label.as_ptr()));
-    }
-
-    let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-    match fg_name {
-        Some(name) => append(
-            menu,
-            ID_EXCLUDE,
-            &format!("排除当前应用 ({name})"),
-            false,
-            false,
-        ),
-        None => append(menu, ID_EXCLUDE, "排除当前应用", false, true),
-    }
-    let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-    append(menu, ID_EXIT, "退出", false, false);
 
     let mut pt = POINT::default();
     let _ = GetCursorPos(&mut pt);

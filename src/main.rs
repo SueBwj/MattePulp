@@ -1,10 +1,12 @@
-//! Sue-Paper：Windows 屏幕纸张纹理覆盖工具
+//! Sue-Paper：Windows 屏幕纸张纹理覆盖工具（界面名称为柔纸 / MattePulp）
 //! 核心功能包括全屏程序生成纸张纹理、鼠标键盘穿透、
-//! 托盘控制、应用排除列表、打盹、多显示器。
+//! 托盘控制、简体中文或英文菜单、应用排除列表、打盹、多显示器。
+//! 可执行文件名仍是 sue-paper。
 
 #![windows_subsystem = "windows"]
 
 mod exclusion;
+mod locale;
 mod monitor;
 mod overlay;
 mod settings;
@@ -34,6 +36,8 @@ pub const ID_INT_BASE: u16 = 1200; // 1200..1203
 pub const ID_SNOOZE_5: u16 = 1301;
 pub const ID_SNOOZE_15: u16 = 1302;
 pub const ID_EXCLUDE: u16 = 1401;
+pub const ID_LANG_ZH: u16 = 1501;
+pub const ID_LANG_EN: u16 = 1502;
 
 pub const INTENSITIES: [u32; 4] = [15, 20, 25, 30];
 
@@ -83,6 +87,19 @@ fn taskbar_created_message() -> u32 {
 fn save_settings(settings: &Settings) {
     if let Err(error) = settings.save() {
         eprintln!("save settings failed: {error}");
+    }
+}
+
+fn shell_product() -> &'static str {
+    let language = APP.with(|app| locale::effective_language(app.borrow().settings.language));
+    locale::menu_copy(language).product
+}
+
+fn apply_shell_language(hwnd: HWND) {
+    let product = shell_product();
+    unsafe {
+        tray::set_window_title(hwnd, product);
+        tray::set_tray_tip(hwnd, product);
     }
 }
 
@@ -246,6 +263,25 @@ fn handle_command(hwnd: HWND, cmd: u32, fg_name: Option<String>) {
                 }
             }
         }
+        ID_LANG_ZH | ID_LANG_EN => {
+            let selected = if cmd == ID_LANG_ZH {
+                locale::Language::ZhHans
+            } else {
+                locale::Language::En
+            };
+            let changed = APP.with(|app| {
+                let mut app = app.borrow_mut();
+                if app.settings.language == Some(selected) {
+                    return false;
+                }
+                app.settings.language = Some(selected);
+                save_settings(&app.settings);
+                true
+            });
+            if changed {
+                apply_shell_language(hwnd);
+            }
+        }
         c if (ID_TEX_BASE..ID_TEX_BASE + KINDS.len() as u16).contains(&c) => {
             let kind = KINDS[(c - ID_TEX_BASE) as usize];
             let changed = APP.with(|app| {
@@ -285,9 +321,10 @@ fn handle_command(hwnd: HWND, cmd: u32, fg_name: Option<String>) {
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let taskbar_created = taskbar_created_message();
     if taskbar_created != 0 && msg == taskbar_created {
+        let product = shell_product();
         APP.with(|app| {
             if let Some(icon) = app.borrow().tray_icon {
-                if let Err(error) = tray::add_icon(hwnd, icon) {
+                if let Err(error) = tray::add_icon(hwnd, icon, product) {
                     eprintln!("restore tray icon failed: {error}");
                 }
             }
@@ -301,15 +338,16 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             if event == WM_RBUTTONUP || event == WM_LBUTTONUP {
                 // 必须在弹菜单之前捕获前台应用（弹菜单会切前台）
                 let fg = exclusion::foreground_process_name();
-                let (enabled, ti, ii) = APP.with(|app| {
+                let (enabled, ti, ii, language) = APP.with(|app| {
                     let app = app.borrow();
                     (
                         app.settings.enabled,
                         tex_idx(app.settings.texture),
                         int_idx(app.settings.intensity),
+                        locale::effective_language(app.settings.language),
                     )
                 });
-                let cmd = tray::show_menu(hwnd, enabled, ti, ii, fg.as_deref());
+                let cmd = tray::show_menu(hwnd, enabled, ti, ii, fg.as_deref(), language);
                 if cmd != 0 {
                     handle_command(hwnd, cmd, fg);
                 }
@@ -381,14 +419,15 @@ fn run() -> windows::core::Result<()> {
         overlay::register_class(hinst)?;
         let icon = tray::create_app_icon()
             .or_else(|_| LoadIconW(HINSTANCE::default(), IDI_APPLICATION))?;
-        let hwnd = match tray::create_control_window(Some(wndproc), icon, hinst) {
+        let product = shell_product();
+        let hwnd = match tray::create_control_window(Some(wndproc), icon, hinst, product) {
             Ok(hwnd) => hwnd,
             Err(error) => {
                 let _ = DestroyIcon(icon);
                 return Err(error);
             }
         };
-        if let Err(error) = tray::add_icon(hwnd, icon) {
+        if let Err(error) = tray::add_icon(hwnd, icon, product) {
             let _ = DestroyWindow(hwnd);
             let _ = DestroyIcon(icon);
             return Err(error);
@@ -452,7 +491,12 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::overlay_should_be_visible;
+    use super::{overlay_should_be_visible, INTENSITIES};
+
+    #[test]
+    fn intensity_steps_stay_fixed() {
+        assert_eq!(INTENSITIES, [15, 20, 25, 30]);
+    }
 
     #[test]
     fn visibility_respects_every_suppression_state() {
