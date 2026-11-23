@@ -1,5 +1,13 @@
 import AppKit
 
+func hasASCIILetter(_ text: String) -> Bool {
+  text.contains { $0.isASCII && $0.isLetter }
+}
+
+func hasCJK(_ text: String) -> Bool {
+  text.contains { ("\u{4E00}"..."\u{9FFF}").contains($0) }
+}
+
 @MainActor
 func require(_ condition: @autoclosure () -> Bool, _ message: String) {
   if !condition() {
@@ -15,6 +23,37 @@ func settingsTests(_ scratch: URL) throws {
   require(missing == Settings(), "missing settings use defaults")
   let partial = try JSONDecoder().decode(Settings.self, from: Data("{\"enabled\":false}".utf8))
   require(!partial.enabled && partial.intensity == 20, "partial settings keep defaults")
+  require(partial.language == nil, "old settings omit language")
+  let unknown = try JSONDecoder().decode(
+    Settings.self,
+    from: Data("{\"enabled\":false,\"intensity\":15,\"language\":\"zh-Hant\"}".utf8))
+  require(
+    !unknown.enabled && unknown.intensity == 15 && unknown.language == nil,
+    "unknown language does not reset settings")
+  require(
+    AppLanguage.resolved(saved: nil, preferred: ["zh-Hans-CN"]) == .zhHans, "simplified default")
+  require(
+    AppLanguage.resolved(saved: nil, preferred: ["zh-Hant-TW"]) == .en, "traditional uses English")
+  require(AppLanguage.resolved(saved: nil, preferred: ["en-US"]) == .en, "english default")
+  require(AppLanguage.resolved(saved: nil, preferred: []) == .en, "missing locale uses English")
+  require(AppLanguage.resolved(saved: "en", preferred: ["zh-Hans-CN"]) == .en, "saved choice wins")
+  var chosen = Settings()
+  chosen.language = "zh-Hans"
+  chosen.intensity = 25
+  try chosen.save(to: url)
+  let reopened = try Settings.load(from: url)
+  require(reopened.language == "zh-Hans" && reopened.intensity == 25, "language reopens")
+  let omitted = Settings()
+  try omitted.save(to: url)
+  let omittedText = String(decoding: try Data(contentsOf: url), as: UTF8.self)
+  require(!omittedText.contains("\"language\""), "unset language is not written")
+  let chinese = MenuText.make(.zhHans)
+  let english = MenuText.make(.en)
+  require(
+    chinese.commandLabels.allSatisfy { !hasASCIILetter($0) }, "Chinese commands stay Chinese")
+  require(english.commandLabels.allSatisfy { !hasCJK($0) }, "English commands stay English")
+  require(chinese.intensities == ["15%", "20%", "25%", "30%"], "Chinese intensity steps")
+  require(english.intensities == ["15%", "20%", "25%", "30%"], "English intensity steps")
   var settings = Settings()
   settings.texture = "unknown"
   settings.intensity = 99
@@ -198,6 +237,35 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
       } catch StartupError.alreadyRunning {} catch { require(false, "duplicate instance error") }
       second.shutdown()
     } catch { require(false, "menu persistence/lock: \(error)") }
+    menu.item(at: 3)!.submenu!.performActionForItem(at: 1)
+    controller.menuNeedsUpdate(menu)
+    require(controller.settings.language == "en", "English choice persisted")
+    require(menu.item(at: 0)?.title == "Enable paper texture", "English menu refreshed")
+    require(menu.item(at: 1)?.title == "Texture", "English texture menu")
+    require(menu.item(at: 2)?.title == "Intensity", "English intensity menu")
+    require(
+      menu.item(at: 2)?.submenu?.items.map(\.title) == ["15%", "20%", "25%", "30%"],
+      "intensity steps unchanged")
+    require(
+      menu.item(at: 2)?.submenu?.items.map { $0.accessibilityLabel() }
+        == ["15%", "20%", "25%", "30%"],
+      "intensity accessibility values")
+    require(controller.statusItem?.button?.title == "S", "menu bar mark stays S")
+    require(
+      controller.statusItem?.button?.accessibilityLabel() == "MattePulp",
+      "English accessibility name")
+    menu.item(at: 3)!.submenu!.performActionForItem(at: 0)
+    controller.menuNeedsUpdate(menu)
+    require(menu.item(at: 0)?.title == "启用纸张纹理", "Chinese menu refreshed")
+    require(menu.item(at: 1)?.submenu?.item(at: 2)?.title == "羊皮纸", "Chinese texture name")
+    require(
+      controller.statusItem?.button?.accessibilityLabel() == "柔纸", "Chinese accessibility name")
+    do {
+      let saved = try Settings.load(from: controller.settingsURL)
+      require(
+        saved.language == "zh-Hans" && saved.intensity == 30 && saved.texture == "Parchment",
+        "language reopens with texture and strength")
+    } catch { require(false, "language reopen: \(error)") }
     controller.snooze(for: 0.1)
     require(controller.overlays.allSatisfy { !$0.isVisible }, "snooze hides immediately")
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.exerciseExclusion() }

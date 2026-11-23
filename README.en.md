@@ -31,7 +31,7 @@ Windows v0.1.0 is commit `53b266a`. That build is named Sue-Paper, uses the olde
 
 The Mac prerelease is commit `d9fb2c7` and is Apple Silicon only. Its disk image already uses the translucent paper icon. Menu items still carry Chinese and English together, it has no separate language choice, and it is not notarized. Gatekeeper may block a downloaded copy.
 
-In this source tree the Windows tray shows 柔纸 or MattePulp and has a language menu. That interface has no new Windows package yet. The Mac source menu still matches the prerelease above.
+In this source tree the Windows tray and the Mac menu bar show 柔纸 or MattePulp and each has its own language menu. That interface has no new package yet. The Mac menu-bar mark stays S, and intensity stays on four steps.
 
 ## Usage
 
@@ -60,7 +60,7 @@ The tray tip and the hidden window title are 柔纸 in Chinese and MattePulp in 
 
 Older settings with no `language` field still load. The menu then follows the Windows UI language. `zh-Hans`, `zh-CN`, `zh-SG`, and `zh-CHS` select Simplified Chinese. Traditional Chinese and every other language select English. A choice is stored as `language` with the value `zh-Hans` or `en`, and the next launch keeps it. The file remains `%APPDATA%\Sue-Paper\settings.json`.
 
-**Mac.** Open the prerelease disk image, or a `Sue-Paper.app` you built, and click **S** in the menu bar. The current menu prints both languages on each item, for example "启用 Enabled", "打盹 5 分钟 / Snooze 5 minutes", and "退出 Quit Sue-Paper". Intensity uses the same four steps. While snoozing, the menu adds "恢复 Resume now". Exclusions use a bundle identifier, or the executable URL when there is no bundle identifier. The app asks for neither Accessibility nor Screen Recording permission. Settings remain `~/Library/Application Support/Sue-Paper/settings.json`.
+**Mac.** The published disk image still has the mixed-language menu described above. Build `Sue-Paper.app` from this source and click **S** in the menu bar. Each time the menu opens it uses one language: Enable paper texture, Texture, Intensity, Language, Snooze for 5 or 15 minutes, Exclude or Include, and Quit MattePulp. While snoozing, the menu adds "Resume now". Intensity remains 15%, 20%, 25%, and 30%. With no `language` field, the menu follows the system UI language using the same rules as Windows; a choice is stored in the same `language` value. The menu-bar tip and accessibility name switch immediately to 柔纸 or MattePulp, while the visible mark stays S. Exclusions use a bundle identifier, or the executable URL when there is no bundle identifier. The app asks for neither Accessibility nor Screen Recording permission. Settings remain `~/Library/Application Support/Sue-Paper/settings.json`. Finder shows the display name MattePulp, and the executable remains `Sue-Paper`.
 
 ## Compatibility
 

@@ -8,6 +8,8 @@ struct Settings: Codable, Equatable {
   var intensity = 20
   // Bundle identifiers, or executable URLs for apps without a bundle identifier.
   var exclusions: [String] = []
+  /// Saved interface language. Nil follows the system UI language.
+  var language: String?
 
   init() {}
 
@@ -17,12 +19,14 @@ struct Settings: Codable, Equatable {
     texture = try values.decodeIfPresent(String.self, forKey: .texture) ?? "ClassicMatte"
     intensity = try values.decodeIfPresent(Int.self, forKey: .intensity) ?? 20
     exclusions = try values.decodeIfPresent([String].self, forKey: .exclusions) ?? []
+    language = try values.decodeIfPresent(String.self, forKey: .language)
     normalize()
   }
 
   mutating func normalize() {
     if !Self.textures.contains(texture) { texture = "ClassicMatte" }
     if !Self.intensities.contains(intensity) { intensity = 20 }
+    if let language, AppLanguage(rawValue: language) == nil { self.language = nil }
     exclusions = Array(
       Set(
         exclusions.map {

@@ -31,7 +31,7 @@ Windows v0.1.0 对应提交 `53b266a`。那个包里的程序名叫 Sue-Paper，
 
 Mac 预发布对应提交 `d9fb2c7`，只含 Apple Silicon。磁盘镜像里已经是这张半透明纸图标。菜单仍把中文和英文写在同一项上，没有单独的语言选择，也没有公证。Gatekeeper 可能拦住从网络下载的副本。
 
-当前源码里的 Windows 托盘会显示柔纸或 MattePulp，并提供语言菜单。这套界面还没有新的 Windows 安装包。Mac 源码菜单仍与上述预发布相同。
+当前源码里，Windows 托盘和 Mac 菜单栏都会显示柔纸或 MattePulp，并提供单独的语言菜单。这套界面还没有新的安装包。Mac 菜单栏记号仍是 S，强度仍是四档。
 
 ## 使用
 
@@ -60,7 +60,7 @@ Mac 预发布对应提交 `d9fb2c7`，只含 Apple Silicon。磁盘镜像里已�
 
 没有 `language` 字段的旧设置仍可打开。这时跟随 Windows 界面语言：`zh-Hans`、`zh-CN`、`zh-SG`、`zh-CHS` 用简体中文，繁体中文和其他语言用英文。选定后写入 `language`，值为 `zh-Hans` 或 `en`，下次启动继续用它。设置文件仍在 `%APPDATA%\Sue-Paper\settings.json`。
 
-**Mac。** 打开预发布磁盘镜像或自行构建的 `Sue-Paper.app`，点菜单栏上的 **S**。当前菜单把两种语言写在一起，例如「启用 Enabled」「打盹 5 分钟 / Snooze 5 minutes」「退出 Quit Sue-Paper」。强度同样是四档。打盹中会多出「恢复 Resume now」。排除项使用 bundle identifier，没有标识时用可执行文件 URL。不需要辅助功能或屏幕录制权限。设置仍在 `~/Library/Application Support/Sue-Paper/settings.json`。
+**Mac。** 已发布的磁盘镜像仍是上面的混合语言菜单。从这棵源码构建 `Sue-Paper.app` 后，点菜单栏上的 **S**。菜单每次打开都只用一种语言：启用纸张纹理、纹理、强度、语言、打盹 5 或 15 分钟、排除或取消排除、退出柔纸。打盹中会多出「立即恢复」。强度仍是 15%、20%、25%、30%。没有 `language` 字段时跟随系统界面语言，规则与 Windows 相同；选定后写入同一个 `language` 值。菜单栏提示和辅助功能名称会立即换成柔纸或 MattePulp，记号仍是 S。排除项使用 bundle identifier，没有标识时用可执行文件 URL。不需要辅助功能或屏幕录制权限。设置仍在 `~/Library/Application Support/Sue-Paper/settings.json`。Finder 里的显示名是 MattePulp，可执行文件名仍是 `Sue-Paper`。
 
 ## 兼容性
 

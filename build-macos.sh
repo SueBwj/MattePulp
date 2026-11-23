@@ -25,7 +25,7 @@ cargo run --locked --release --manifest-path "$root/Cargo.toml" --bin export_tex
     "$app/Contents/Resources/Textures"
 xcrun swiftc -swift-version 6 -warnings-as-errors -O -target arm64-apple-macosx12.0 \
     -module-cache-path "$CLANG_MODULE_CACHE_PATH" -framework AppKit \
-    "$root/macos/Settings.swift" "$root/macos/Overlay.swift" \
+    "$root/macos/Settings.swift" "$root/macos/Locale.swift" "$root/macos/Overlay.swift" \
     "$root/macos/AppController.swift" "$root/macos/main.swift" \
     -o "$app/Contents/MacOS/Sue-Paper"
 cp "$root/macos/Info.plist" "$app/Contents/Info.plist"
