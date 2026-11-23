@@ -14,7 +14,7 @@ For a short launch/exit check without writing normal user settings:
 
 ```sh
 scratch=$(mktemp -d)
-/tmp/sue-paper-build/Sue-Paper.app/Contents/MacOS/Sue-Paper --smoke-test "$scratch"
+/tmp/mattepulp-build/Sue-Paper.app/Contents/MacOS/Sue-Paper --smoke-test "$scratch"
 rm -rf "$scratch"
 ```
 

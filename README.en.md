@@ -8,15 +8,11 @@
 
 **MattePulp covers the screen with a generated paper texture so a bright display reads like matte paper.**
 
-The Chinese name is 柔纸. The repository, the Windows executable, and the Mac bundle stay named sue-paper, so existing download URLs, settings folders, and texture ids stay put. The Windows app is a portable tray program. The Mac app is a native Apple Silicon menu-bar program. Both use the same texture engine.
-
 <p align="center">
-  <img src="assets/showcase1.png" width="32%" alt="Paper grain over a reading page. The page is third-party writing.">
-  <img src="assets/showcase2.png" width="32%" alt="The same reading page with a highlighted passage. Those words are not part of MattePulp.">
-  <img src="assets/showcase3.png" width="32%" alt="A later page in that reading view, still under the paper grain.">
+  <img src="assets/showcase1.png" width="32%" alt="Paper grain over a reading page">
+  <img src="assets/showcase2.png" width="32%" alt="The same reading page with a highlighted passage under the grain">
+  <img src="assets/showcase3.png" width="32%" alt="A later page in the same reading view, still under the grain">
 </p>
-
-The writing in these pictures belongs to its authors. MattePulp adds the grain. It does not claim the words or the reading app.
 
 ## Download
 
@@ -66,7 +62,6 @@ Older settings with no `language` field still load. The menu then follows the Wi
 
 - The published Windows package is 64-bit. An older `settings.json` with no language field still loads. The intensity steps are unchanged.
 - The published Mac package is Apple Silicon and needs macOS 12 or newer. v0.1.1-macos.1 is ad-hoc signed and not notarized.
-- The bundle identifier remains `com.suebwj.sue-paper`. The Mac executable remains `Sue-Paper`. The Windows executable remains `sue-paper.exe`.
 - The running program uses about 22-27 MB of memory. A still texture does not keep using CPU; it is redrawn when you change it. Overlays are rebuilt when the displays change. Those figures describe the existing Windows program.
 
 ## Build and test
@@ -96,9 +91,9 @@ The `windows` crate stays on 0.58 because that release uses the prebuilt import 
 Requires macOS 12 or newer, Rust stable, and Xcode 16 or newer, with Swift 6 and `swift-format` available through `xcrun`:
 
 ```sh
-./build-macos.sh /tmp/sue-paper-build
-./test-macos.sh /tmp/sue-paper-build
-open /tmp/sue-paper-build/Sue-Paper.app
+./build-macos.sh /tmp/mattepulp-build
+./test-macos.sh /tmp/mattepulp-build
+open /tmp/mattepulp-build/Sue-Paper.app
 ```
 
 Use a fresh output directory for each build. The outputs are `Sue-Paper.app` and `sue-paper-macos-arm64.zip`. The script places `LICENSE` in `Contents/Resources` before the ad-hoc signature. Running the app does not require Rust. Quit from the **S** menu. Tests use temporary settings and synthetic windows, enter fullscreen briefly, and then close those windows. They do not capture the desktop. The tested environment and the display and Spaces limits are in the [Mac build and validation notes](macos/README.md).

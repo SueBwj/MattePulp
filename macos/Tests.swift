@@ -171,7 +171,7 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
       fixture = NSWindow(
         contentRect: NSRect(x: 100, y: 100, width: 640, height: 420),
         styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-      fixture.title = "Sue-Paper synthetic test fixture"
+      fixture.title = "MattePulp synthetic test fixture"
       fixture.isReleasedWhenClosed = false
       fixture.backgroundColor = .white
       fixture.collectionBehavior = [.fullScreenPrimary]

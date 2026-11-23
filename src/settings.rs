@@ -196,7 +196,7 @@ mod tests {
     #[test]
     fn atomic_save_replaces_existing_file() {
         let dir = std::env::temp_dir().join(format!(
-            "sue-paper-settings-test-{}-{:?}",
+            "mattepulp-settings-test-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));
