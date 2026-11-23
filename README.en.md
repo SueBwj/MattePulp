@@ -51,8 +51,8 @@ Four textures come from fractal noise and tile without a seam. Windows intensity
 **Windows.** Unzip the stable package and run `sue-paper.exe`. When you build this source tree, right-click the tray icon. Each time the menu opens it is rebuilt in one language:
 
 - Enable paper texture
-- Texture, Intensity, and Snooze for 5 or 15 minutes
-- Exclude the current app. An exclusion is the foreground process file name, such as `photos.exe`
+- Texture, Intensity, and Snooze for 5 or 15 minutes. While snoozing, the Snooze menu adds "Resume now", which ends that snooze immediately. Snooze is not written to settings.
+- Exclude or include the current app. An exclusion is the foreground process file name, such as `photos.exe`. When that app is already excluded, the menu offers to include it, and the change takes effect immediately.
 - Language: 中文 or English
 - Quit
 

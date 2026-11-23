@@ -98,6 +98,20 @@ impl Settings {
         self.exclusions.dedup();
         self
     }
+
+    /// Adds `name`, or removes it when it is already stored.
+    /// Refuses to add this process's own file name. An existing own-process entry can still be removed.
+    pub fn toggle_exclusion(&mut self, name: &str, own: Option<&str>) -> bool {
+        if let Some(index) = self.exclusions.iter().position(|entry| entry == name) {
+            self.exclusions.remove(index);
+            return true;
+        }
+        if own == Some(name) {
+            return false;
+        }
+        self.exclusions.push(name.to_string());
+        true
+    }
 }
 
 fn save_to_path(path: &Path, settings: &Settings) -> io::Result<()> {
@@ -161,6 +175,20 @@ mod tests {
         assert_eq!(settings.intensity, 20);
         assert_eq!(settings.exclusions, ["foo.exe"]);
         assert_eq!(settings.language, Some(Language::En));
+    }
+
+    #[test]
+    fn exclusion_toggle_adds_and_removes_without_adding_this_process() {
+        let mut settings = Settings::default();
+        assert!(settings.toggle_exclusion("photos.exe", Some("sue-paper.exe")));
+        assert_eq!(settings.exclusions, ["photos.exe"]);
+        assert!(!settings.toggle_exclusion("sue-paper.exe", Some("sue-paper.exe")));
+        assert_eq!(settings.exclusions, ["photos.exe"]);
+        settings.exclusions.push("sue-paper.exe".into());
+        assert!(settings.toggle_exclusion("sue-paper.exe", Some("sue-paper.exe")));
+        assert_eq!(settings.exclusions, ["photos.exe"]);
+        assert!(settings.toggle_exclusion("photos.exe", Some("sue-paper.exe")));
+        assert!(settings.exclusions.is_empty());
     }
 
     #[test]

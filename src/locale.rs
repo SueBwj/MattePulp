@@ -8,7 +8,7 @@ use windows::Win32::Globalization::{
 
 use crate::texture::KIND_NAMES;
 use crate::{
-    ID_EXCLUDE, ID_EXIT, ID_INT_BASE, ID_LANG_EN, ID_LANG_ZH, ID_SNOOZE_15, ID_SNOOZE_5,
+    ID_EXCLUDE, ID_EXIT, ID_INT_BASE, ID_LANG_EN, ID_LANG_ZH, ID_RESUME, ID_SNOOZE_15, ID_SNOOZE_5,
     ID_TEX_BASE, ID_TOGGLE, INTENSITIES,
 };
 
@@ -110,6 +110,7 @@ pub struct MenuCopy {
     pub snooze_menu: &'static str,
     pub snooze_5: &'static str,
     pub snooze_15: &'static str,
+    pub resume: &'static str,
     pub exclude_empty: &'static str,
     pub language_menu: &'static str,
     pub quit: &'static str,
@@ -126,6 +127,7 @@ pub fn menu_copy(language: Language) -> MenuCopy {
             snooze_menu: "打盹",
             snooze_5: "暂停 5 分钟",
             snooze_15: "暂停 15 分钟",
+            resume: "立即恢复",
             exclude_empty: "排除当前应用",
             language_menu: "语言",
             quit: "退出",
@@ -139,6 +141,7 @@ pub fn menu_copy(language: Language) -> MenuCopy {
             snooze_menu: "Snooze",
             snooze_5: "Snooze 5 minutes",
             snooze_15: "Snooze 15 minutes",
+            resume: "Resume now",
             exclude_empty: "Exclude current app",
             language_menu: "Language",
             quit: "Quit",
@@ -171,6 +174,13 @@ pub fn exclude_label(language: Language, name: &str) -> String {
     }
 }
 
+pub fn include_label(language: Language, name: &str) -> String {
+    match language {
+        Language::ZhHans => format!("取消排除当前应用 ({name})"),
+        Language::En => format!("Include current app ({name})"),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MenuNode {
     Separator,
@@ -186,13 +196,27 @@ pub enum MenuNode {
     },
 }
 
-pub fn menu_model(
-    language: Language,
-    enabled: bool,
-    texture_index: usize,
-    intensity_index: usize,
-    foreground: Option<&str>,
-) -> Vec<MenuNode> {
+#[derive(Clone, Copy)]
+pub struct MenuRequest<'a> {
+    pub language: Language,
+    pub enabled: bool,
+    pub texture_index: usize,
+    pub intensity_index: usize,
+    pub foreground: Option<&'a str>,
+    pub snoozed: bool,
+    pub foreground_excluded: bool,
+}
+
+pub fn menu_model(request: &MenuRequest<'_>) -> Vec<MenuNode> {
+    let MenuRequest {
+        language,
+        enabled,
+        texture_index,
+        intensity_index,
+        foreground,
+        snoozed,
+        foreground_excluded,
+    } = *request;
     let copy = menu_copy(language);
     debug_assert_eq!(KIND_NAMES.len(), 4);
     debug_assert_eq!(INTENSITIES, [15, 20, 25, 30]);
@@ -220,8 +244,12 @@ pub fn menu_model(
     let exclude = match foreground {
         Some(name) => MenuNode::Command {
             id: ID_EXCLUDE,
-            label: exclude_label(language, name),
-            checked: false,
+            label: if foreground_excluded {
+                include_label(language, name)
+            } else {
+                exclude_label(language, name)
+            },
+            checked: foreground_excluded,
             enabled: true,
         },
         None => MenuNode::Command {
@@ -231,6 +259,28 @@ pub fn menu_model(
             enabled: false,
         },
     };
+    let mut snooze_items = vec![
+        MenuNode::Command {
+            id: ID_SNOOZE_5,
+            label: copy.snooze_5.to_string(),
+            checked: false,
+            enabled: true,
+        },
+        MenuNode::Command {
+            id: ID_SNOOZE_15,
+            label: copy.snooze_15.to_string(),
+            checked: false,
+            enabled: true,
+        },
+    ];
+    if snoozed {
+        snooze_items.push(MenuNode::Command {
+            id: ID_RESUME,
+            label: copy.resume.to_string(),
+            checked: false,
+            enabled: true,
+        });
+    }
 
     vec![
         MenuNode::Command {
@@ -254,20 +304,7 @@ pub fn menu_model(
         },
         MenuNode::Submenu {
             label: copy.snooze_menu.to_string(),
-            items: vec![
-                MenuNode::Command {
-                    id: ID_SNOOZE_5,
-                    label: copy.snooze_5.to_string(),
-                    checked: false,
-                    enabled: true,
-                },
-                MenuNode::Command {
-                    id: ID_SNOOZE_15,
-                    label: copy.snooze_15.to_string(),
-                    checked: false,
-                    enabled: true,
-                },
-            ],
+            items: snooze_items,
         },
         MenuNode::Submenu {
             label: copy.language_menu.to_string(),
@@ -356,8 +393,8 @@ mod tests {
 
     #[test]
     fn menu_uses_one_language_and_keeps_intensity_steps() {
-        let chinese = menu_model(Language::ZhHans, true, 1, 2, None);
-        let english = menu_model(Language::En, false, 1, 2, None);
+        let chinese = opened(Language::ZhHans, true, 1, 2, None, false, false);
+        let english = opened(Language::En, false, 1, 2, None, false, false);
         let chinese_commands = command_labels(&chinese);
         let english_commands = command_labels(&english);
 
@@ -390,8 +427,8 @@ mod tests {
     #[test]
     fn rebuilding_the_menu_replaces_every_translated_label() {
         let foreground = Some("notes.exe");
-        let chinese = menu_model(Language::ZhHans, true, 0, 0, foreground);
-        let english = menu_model(Language::En, true, 0, 0, foreground);
+        let chinese = opened(Language::ZhHans, true, 0, 0, foreground, false, false);
+        let english = opened(Language::En, true, 0, 0, foreground, false, false);
         let chinese_labels = command_labels(&chinese);
         let english_labels = command_labels(&english);
         assert_ne!(chinese_labels, english_labels);
@@ -405,13 +442,81 @@ mod tests {
 
     #[test]
     fn checked_marks_follow_current_texture_intensity_and_power_state() {
-        let menu = menu_model(Language::En, true, 2, 3, None);
+        let menu = opened(Language::En, true, 2, 3, None, false, false);
         assert!(command_checked(&menu, ID_TOGGLE));
         assert!(command_checked(&menu, ID_TEX_BASE + 2));
         assert!(!command_checked(&menu, ID_TEX_BASE));
         assert!(command_checked(&menu, ID_INT_BASE + 3));
         assert!(!command_checked(&menu, ID_INT_BASE));
         assert!(!command_enabled(&menu, ID_EXCLUDE));
+        assert!(command_label(&menu, ID_RESUME).is_none());
+    }
+
+    #[test]
+    fn snoozed_menu_offers_resume_and_an_excluded_app_can_be_included() {
+        let awake = opened(Language::En, true, 0, 1, Some("photos.exe"), false, false);
+        assert!(command_label(&awake, ID_RESUME).is_none());
+        assert_eq!(
+            command_label(&awake, ID_EXCLUDE).as_deref(),
+            Some("Exclude current app (photos.exe)")
+        );
+        assert!(!command_checked(&awake, ID_EXCLUDE));
+        assert_eq!(intensity_labels(&awake), ["15%", "20%", "25%", "30%"]);
+
+        let snoozed = opened(Language::En, true, 0, 1, Some("photos.exe"), true, true);
+        assert_eq!(
+            command_label(&snoozed, ID_RESUME).as_deref(),
+            Some("Resume now")
+        );
+        assert!(command_enabled(&snoozed, ID_RESUME));
+        assert_eq!(
+            command_label(&snoozed, ID_EXCLUDE).as_deref(),
+            Some("Include current app (photos.exe)")
+        );
+        assert!(command_checked(&snoozed, ID_EXCLUDE));
+
+        let chinese = opened(Language::ZhHans, true, 0, 1, Some("photos.exe"), true, true);
+        assert_eq!(
+            command_label(&chinese, ID_RESUME).as_deref(),
+            Some("立即恢复")
+        );
+        assert_eq!(
+            command_label(&chinese, ID_EXCLUDE).as_deref(),
+            Some("取消排除当前应用 (photos.exe)")
+        );
+        assert!(
+            command_labels(&chinese)
+                .replace("photos.exe", "")
+                .chars()
+                .all(|ch| !ch.is_ascii_alphabetic()),
+            "{}",
+            command_labels(&chinese)
+        );
+        assert!(
+            command_labels(&snoozed).chars().all(|ch| !is_cjk(ch)),
+            "{}",
+            command_labels(&snoozed)
+        );
+    }
+
+    fn opened(
+        language: Language,
+        enabled: bool,
+        texture_index: usize,
+        intensity_index: usize,
+        foreground: Option<&str>,
+        snoozed: bool,
+        foreground_excluded: bool,
+    ) -> Vec<MenuNode> {
+        menu_model(&MenuRequest {
+            language,
+            enabled,
+            texture_index,
+            intensity_index,
+            foreground,
+            snoozed,
+            foreground_excluded,
+        })
     }
 
     fn is_cjk(ch: char) -> bool {
@@ -450,6 +555,21 @@ mod tests {
                 (id, label, checked)
             })
             .collect()
+    }
+
+    fn command_label(nodes: &[MenuNode], wanted: u16) -> Option<String> {
+        for node in nodes {
+            match node {
+                MenuNode::Command { id, label, .. } if *id == wanted => return Some(label.clone()),
+                MenuNode::Submenu { items, .. } => {
+                    if let Some(label) = command_label(items, wanted) {
+                        return Some(label);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
     }
 
     fn command_checked(nodes: &[MenuNode], wanted: u16) -> bool {

@@ -35,6 +35,7 @@ pub const ID_TEX_BASE: u16 = 1100; // 1100..1103
 pub const ID_INT_BASE: u16 = 1200; // 1200..1203
 pub const ID_SNOOZE_5: u16 = 1301;
 pub const ID_SNOOZE_15: u16 = 1302;
+pub const ID_RESUME: u16 = 1303;
 pub const ID_EXCLUDE: u16 = 1401;
 pub const ID_LANG_ZH: u16 = 1501;
 pub const ID_LANG_EN: u16 = 1502;
@@ -107,6 +108,13 @@ fn overlay_should_be_visible(enabled: bool, snoozed: bool, hidden_by_exclusion: 
     enabled && !snoozed && !hidden_by_exclusion
 }
 
+fn foreground_is_excluded(exclusions: &[String], foreground: Option<&str>) -> bool {
+    match foreground {
+        Some(name) => exclusions.iter().any(|entry| entry == name),
+        None => false,
+    }
+}
+
 /// 重新生成纹理并应用到所有覆盖窗口
 fn refresh_textures() {
     APP.with(|app| {
@@ -160,10 +168,7 @@ fn poll_exclusion() {
     let fg = exclusion::foreground_process_name();
     APP.with(|app| {
         let mut app = app.borrow_mut();
-        let excluded = fg
-            .as_deref()
-            .map(|name| app.settings.exclusions.iter().any(|e| e == name))
-            .unwrap_or(false);
+        let excluded = foreground_is_excluded(&app.settings.exclusions, fg.as_deref());
         if excluded != app.hidden_by_exclusion {
             app.hidden_by_exclusion = excluded;
             drop(app);
@@ -247,19 +252,30 @@ fn handle_command(hwnd: HWND, cmd: u32, fg_name: Option<String>) {
                 }
             }
         }
+        ID_RESUME => {
+            unsafe {
+                let _ = KillTimer(hwnd, TIMER_SNOOZE);
+            }
+            APP.with(|app| app.borrow_mut().snoozed = false);
+            apply_visibility();
+        }
         ID_EXCLUDE => {
             if let Some(name) = fg_name {
                 let own = std::env::current_exe()
                     .ok()
                     .and_then(|p| p.file_name().map(|s| s.to_string_lossy().to_lowercase()));
-                if Some(&name) != own.as_ref() {
-                    APP.with(|app| {
-                        let mut app = app.borrow_mut();
-                        if !app.settings.exclusions.contains(&name) {
-                            app.settings.exclusions.push(name);
-                            save_settings(&app.settings);
-                        }
-                    });
+                let changed = APP.with(|app| {
+                    let mut app = app.borrow_mut();
+                    if !app.settings.toggle_exclusion(&name, own.as_deref()) {
+                        return false;
+                    }
+                    save_settings(&app.settings);
+                    app.hidden_by_exclusion =
+                        foreground_is_excluded(&app.settings.exclusions, Some(&name));
+                    true
+                });
+                if changed {
+                    apply_visibility();
                 }
             }
         }
@@ -338,16 +354,29 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             if event == WM_RBUTTONUP || event == WM_LBUTTONUP {
                 // 必须在弹菜单之前捕获前台应用（弹菜单会切前台）
                 let fg = exclusion::foreground_process_name();
-                let (enabled, ti, ii, language) = APP.with(|app| {
+                let (enabled, ti, ii, language, snoozed, foreground_excluded) = APP.with(|app| {
                     let app = app.borrow();
                     (
                         app.settings.enabled,
                         tex_idx(app.settings.texture),
                         int_idx(app.settings.intensity),
                         locale::effective_language(app.settings.language),
+                        app.snoozed,
+                        foreground_is_excluded(&app.settings.exclusions, fg.as_deref()),
                     )
                 });
-                let cmd = tray::show_menu(hwnd, enabled, ti, ii, fg.as_deref(), language);
+                let cmd = tray::show_menu(
+                    hwnd,
+                    &locale::MenuRequest {
+                        language,
+                        enabled,
+                        texture_index: ti,
+                        intensity_index: ii,
+                        foreground: fg.as_deref(),
+                        snoozed,
+                        foreground_excluded,
+                    },
+                );
                 if cmd != 0 {
                     handle_command(hwnd, cmd, fg);
                 }
@@ -491,7 +520,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{overlay_should_be_visible, INTENSITIES};
+    use super::{foreground_is_excluded, overlay_should_be_visible, INTENSITIES};
 
     #[test]
     fn intensity_steps_stay_fixed() {
@@ -505,5 +534,23 @@ mod tests {
         assert!(!overlay_should_be_visible(true, true, false));
         assert!(!overlay_should_be_visible(true, false, true));
         assert!(!overlay_should_be_visible(false, true, true));
+    }
+
+    #[test]
+    fn foreground_exclusion_matches_the_process_name_only() {
+        let exclusions = vec!["photos.exe".to_string()];
+        assert!(foreground_is_excluded(&exclusions, Some("photos.exe")));
+        assert!(!foreground_is_excluded(&exclusions, Some("notes.exe")));
+        assert!(!foreground_is_excluded(&exclusions, None));
+        assert!(!overlay_should_be_visible(
+            true,
+            false,
+            foreground_is_excluded(&exclusions, Some("photos.exe")),
+        ));
+        assert!(overlay_should_be_visible(
+            true,
+            false,
+            foreground_is_excluded(&exclusions, Some("notes.exe")),
+        ));
     }
 }
