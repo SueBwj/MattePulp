@@ -426,19 +426,26 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
   }
 
-  func knobPoint(_ value: Double, of slider: NSSlider) -> NSPoint {
+  func knobTrackGeometry(of slider: NSSlider) -> (minX: CGFloat, maxX: CGFloat, midY: CGFloat) {
     let cell = slider.cell as! NSSliderCell
-    let knob = cell.knobRect(flipped: slider.isFlipped)
-    let bar = slider.bounds.insetBy(dx: knob.width / 2, dy: 0)
-    let fraction = (value - slider.minValue) / max(slider.maxValue - slider.minValue, 1)
-    return NSPoint(x: bar.minX + CGFloat(fraction) * bar.width, y: knob.midY)
+    let saved = slider.doubleValue
+    slider.doubleValue = slider.minValue
+    let minKnob = cell.knobRect(flipped: slider.isFlipped)
+    slider.doubleValue = slider.maxValue
+    let maxKnob = cell.knobRect(flipped: slider.isFlipped)
+    slider.doubleValue = saved
+    return (minKnob.midX, maxKnob.midX, minKnob.midY)
   }
 
   func postMouseEvent(
-    _ type: NSEvent.EventType, value: Double, to slider: NSSlider
+    _ type: NSEvent.EventType, value: Double, to slider: NSSlider,
+    geometry: (minX: CGFloat, maxX: CGFloat, midY: CGFloat)
   ) {
+    let fraction = (value - slider.minValue) / max(slider.maxValue - slider.minValue, 1)
+    let point = NSPoint(
+      x: geometry.minX + CGFloat(fraction) * (geometry.maxX - geometry.minX), y: geometry.midY)
     let event = NSEvent.mouseEvent(
-      with: type, location: slider.convert(knobPoint(value, of: slider), to: nil),
+      with: type, location: slider.convert(point, to: nil),
       modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
       windowNumber: slider.window!.windowNumber, context: nil, eventNumber: 1,
       clickCount: 1, pressure: 1)
@@ -451,6 +458,7 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     done: @escaping @MainActor () -> Void
   ) {
     let slider = view.slider
+    let geometry = knobTrackGeometry(of: slider)
     dragSamples = []
     // Real drags emit leftMouseDragged at the target coordinate before leftMouseUp releases there.
     dragScript = stops.map { (value: Double($0), up: false) }
@@ -458,7 +466,7 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     dragScript.append((value: Double(end), up: true))
     let scriptCount = dragScript.count
     dragTick = 0
-    let sampler = Timer(timeInterval: 0.04, repeats: true) { _ in
+    let sampler = Timer(timeInterval: 0.05, repeats: true) { _ in
       MainActor.assumeIsolated {
         self.dragTick += 1
         if self.dragTick <= scriptCount {
@@ -467,8 +475,9 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
           self.dragSamples.append((shown, self.controller.settings.intensity, disk))
           let step = self.dragScript.removeFirst()
           self.postMouseEvent(
-            step.up ? .leftMouseUp : .leftMouseDragged, value: step.value, to: slider)
-        } else if self.dragTick >= scriptCount + 2 {
+            step.up ? .leftMouseUp : .leftMouseDragged, value: step.value, to: slider,
+            geometry: geometry)
+        } else if self.dragTick >= scriptCount + 4 {
           self.dragSampler?.invalidate()
           self.dragSampler = nil
           let samples = self.dragSamples
@@ -478,7 +487,13 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
               && view.percentLabel.stringValue == "\(end)%"
               && slider.accessibilityValueDescription() == "\(end)%"
               && self.currentOverlayIntensity() == end,
-            "drag release commits final intensity \(end) and synchronizes UI and overlay")
+            "drag release commits final intensity \(end) and synchronizes UI and overlay"
+              + " (settings=\(self.controller.settings.intensity) shown=\(view.percent)"
+              + " preview=\(String(describing: self.controller.previewIntensity))"
+              + " label=\(view.percentLabel.stringValue)"
+              + " ax=\(String(describing: slider.accessibilityValueDescription()))"
+              + " overlay=\(String(describing: self.currentOverlayIntensity()))"
+              + " samples=\(samples))")
           let persisted = try? Settings.load(from: self.controller.settingsURL)
           require(persisted?.intensity == end, "drag release persists \(end) to disk")
           require(
@@ -493,7 +508,7 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     RunLoop.main.add(sampler, forMode: .common)
     dragSampler = sampler
-    postMouseEvent(.leftMouseDown, value: Double(start), to: slider)
+    postMouseEvent(.leftMouseDown, value: Double(start), to: slider, geometry: geometry)
   }
 
   func exerciseCancelAndStorageFailure(_ view: IntensitySliderView) {

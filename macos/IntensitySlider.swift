@@ -33,20 +33,46 @@ final class IntensityPanel: NSPanel {
     if isVisible { performClose(nil) }
   }
 }
+/// Subclass of NSSliderCell that tracks the exact mouse-drag lifecycle so mouse release
+/// commits reliably across macOS versions (including macOS 15, where continuous sliders
+/// may not fire a trailing action on mouse-up when the snapped tick value is unchanged).
+@MainActor
+final class TrackingSliderCell: NSSliderCell {
+  private(set) var isTrackingMouse = false
+  var onTrackingEnd: ((_ mouseIsUp: Bool) -> Void)?
+
+  override func startTracking(at startPoint: NSPoint, in controlView: NSView) -> Bool {
+    isTrackingMouse = true
+    let shouldContinue = super.startTracking(at: startPoint, in: controlView)
+    if !shouldContinue { isTrackingMouse = false }
+    return shouldContinue
+  }
+
+  override func stopTracking(
+    last lastPoint: NSPoint, current stopPoint: NSPoint, in controlView: NSView,
+    mouseIsUp flag: Bool
+  ) {
+    super.stopTracking(last: lastPoint, current: stopPoint, in: controlView, mouseIsUp: flag)
+    isTrackingMouse = false
+    onTrackingEnd?(flag)
+  }
+}
 
 /// Menu-bar intensity control: a native, keyboard-focusable slider with a live percent
 /// readout. Mouse drags and arrow keys both move in real one-percentage-point steps
 /// (the sixteen tick marks at 15%...30% keep every committed value an integer). While a
 /// drag is tracking, every action previews through `onPreview` without touching storage;
-/// the concluding action of each gesture - mouse release, key press, or accessibility
-/// adjustment - additionally invokes `onCommit` so the shown value is persisted.
+/// mouse release, key presses, and accessibility adjustments additionally invoke `onCommit`
+/// so the shown value is persisted.
 @MainActor
 final class IntensitySliderView: NSView {
   let slider: NSSlider
   let percentLabel: NSTextField
+  private let trackingCell: TrackingSliderCell
 
   var onPreview: ((Int) -> Void)?
   var onCommit: (() -> Void)?
+  var onCancel: (() -> Void)?
 
   init(intensity: Int, title titleText: String = "Intensity") {
     let title = NSTextField(labelWithString: titleText)
@@ -57,11 +83,13 @@ final class IntensitySliderView: NSView {
       ofSize: NSFont.menuFont(ofSize: 0).pointSize, weight: .regular)
     percentLabel.textColor = .labelColor
     percentLabel.alignment = .right
-    slider = NSSlider(
-      value: Double(intensity),
-      minValue: Double(Settings.intensityRange.lowerBound),
-      maxValue: Double(Settings.intensityRange.upperBound),
-      target: nil, action: nil)
+    let cell = TrackingSliderCell()
+    trackingCell = cell
+    slider = NSSlider(frame: NSRect(x: 16, y: 8, width: 236, height: 28))
+    slider.cell = cell
+    slider.minValue = Double(Settings.intensityRange.lowerBound)
+    slider.maxValue = Double(Settings.intensityRange.upperBound)
+    slider.doubleValue = Double(intensity)
     slider.isContinuous = true
     slider.numberOfTickMarks = Settings.intensityRange.count
     slider.tickMarkPosition = .below
@@ -71,6 +99,17 @@ final class IntensitySliderView: NSView {
     super.init(frame: NSRect(x: 0, y: 0, width: 268, height: 68))
     slider.target = self
     slider.action = #selector(adjust(_:))
+    cell.onTrackingEnd = { [weak self] mouseIsUp in
+      guard let self else { return }
+      if mouseIsUp {
+        let value = Int(self.slider.doubleValue.rounded())
+        self.reflect(percent: value)
+        self.onPreview?(value)
+        self.onCommit?()
+      } else {
+        self.onCancel?()
+      }
+    }
     addSubview(title)
     addSubview(percentLabel)
     addSubview(slider)
@@ -98,12 +137,9 @@ final class IntensitySliderView: NSView {
   @objc private func adjust(_ sender: NSSlider) {
     let value = Int(sender.doubleValue.rounded())
     reflect(percent: value)
-    // Mouse-down and drag actions preview; the concluding action of the gesture
-    // (mouse-up, key press, accessibility adjustment) commits what is already shown.
-    let tracking =
-      NSApp.currentEvent.map { $0.type == .leftMouseDown || $0.type == .leftMouseDragged }
-      ?? false
+    // Mouse-drag actions preview only; release commits via TrackingSliderCell.stopTracking.
+    // Keyboard and accessibility adjustments run outside mouse tracking and commit immediately.
     onPreview?(value)
-    if !tracking { onCommit?() }
+    if !trackingCell.isTrackingMouse { onCommit?() }
   }
 }

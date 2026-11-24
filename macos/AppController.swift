@@ -191,6 +191,7 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
       intensity: previewIntensity ?? settings.intensity, title: title)
     view.onPreview = { [weak self] value in self?.previewIntensity(value) }
     view.onCommit = { [weak self] in self?.commitIntensity() }
+    view.onCancel = { [weak self] in self?.cancelIntensityPreview() }
     let panel = IntensityPanel(view: view, title: title)
     intensityPanel = panel
     panel.delegate = self
