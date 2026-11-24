@@ -5,7 +5,7 @@ use std::io::{self, Write};
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use windows::core::PCWSTR;
 use windows::Win32::Storage::FileSystem::{
     MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
@@ -14,8 +14,7 @@ use windows::Win32::Storage::FileSystem::{
 use crate::locale::{self, Language};
 use crate::texture::TextureKind;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Settings {
     pub enabled: bool,
     pub texture: TextureKind,
@@ -25,12 +24,46 @@ pub struct Settings {
     pub exclusions: Vec<String>,
     /// 用户选定的界面语言。缺省时跟随系统 UI 语言。
     #[serde(
-        default,
         skip_serializing_if = "Option::is_none",
-        serialize_with = "locale::serialize_language",
-        deserialize_with = "locale::deserialize_language"
+        serialize_with = "locale::serialize_language"
     )]
     pub language: Option<Language>,
+}
+
+impl<'de> Deserialize<'de> for Settings {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let fields = value
+            .as_object()
+            .ok_or_else(|| serde::de::Error::custom("expected a settings object"))?;
+        let mut settings = Self::default();
+        if let Some(value) = fields.get("enabled").and_then(|v| v.as_bool()) {
+            settings.enabled = value;
+        }
+        if let Some(value) = fields
+            .get("texture")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+        {
+            settings.texture = value;
+        }
+        if let Some(value) = fields
+            .get("intensity")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+        {
+            settings.intensity = value;
+        }
+        if let Some(value) = fields
+            .get("exclusions")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+        {
+            settings.exclusions = value;
+        }
+        settings.language = fields
+            .get("language")
+            .and_then(|v| locale::deserialize_language(v.clone()).ok())
+            .flatten();
+        Ok(settings)
+    }
 }
 
 impl Default for Settings {
@@ -61,18 +94,22 @@ impl Settings {
     pub fn load() -> Self {
         let current = settings_path();
         let legacy = legacy_settings_path();
+        Self::load_from_paths(&current, &legacy)
+    }
+
+    fn load_from_paths(current: &Path, legacy: &Path) -> Self {
         let (path, migrate) = if current.exists() {
-            (current.clone(), false)
+            (current, false)
         } else {
             (legacy, true)
         };
-        match std::fs::read_to_string(&path) {
+        match std::fs::read_to_string(path) {
             Ok(text) => {
                 let settings = serde_json::from_str::<Self>(&text)
                     .map(Self::normalized)
                     .unwrap_or_default();
                 if migrate {
-                    let _ = save_to_path(&current, &settings);
+                    let _ = save_to_path(current, &settings);
                 }
                 settings
             }
@@ -161,6 +198,102 @@ mod tests {
         assert_eq!(settings.texture, TextureKind::ClassicMatte);
         assert_eq!(settings.intensity, 20);
         assert_eq!(settings.language, None);
+    }
+
+    #[test]
+    fn unknown_texture_preserves_other_settings() {
+        let text = r#"{"enabled":false,"texture":"FutureTexture","intensity":25,"exclusions":[" Foo.EXE "],"language":"en","future":true}"#;
+        let settings = serde_json::from_str::<Settings>(text)
+            .map(Settings::normalized)
+            .unwrap_or_default();
+        assert!(!settings.enabled);
+        assert_eq!(settings.texture, TextureKind::ClassicMatte);
+        assert_eq!(settings.intensity, 25);
+        assert_eq!(settings.exclusions, ["foo.exe"]);
+        assert_eq!(settings.language, Some(Language::En));
+    }
+
+    #[test]
+    fn invalid_fields_fall_back_independently() {
+        for field in ["enabled", "texture", "intensity", "exclusions", "language"] {
+            let mut value = serde_json::json!({
+                "enabled": false, "texture": "Parchment", "intensity": 30,
+                "exclusions": ["notes.exe"], "language": "en"
+            });
+            value[field] = serde_json::json!({"invalid": true});
+            let settings: Settings = serde_json::from_value(value).unwrap();
+            assert_eq!(settings.enabled, field == "enabled", "{field}");
+            assert_eq!(
+                settings.texture,
+                if field == "texture" {
+                    TextureKind::ClassicMatte
+                } else {
+                    TextureKind::Parchment
+                },
+                "{field}"
+            );
+            assert_eq!(
+                settings.intensity,
+                if field == "intensity" { 20 } else { 30 },
+                "{field}"
+            );
+            assert_eq!(
+                settings.exclusions,
+                if field == "exclusions" {
+                    vec![]
+                } else {
+                    vec!["notes.exe"]
+                },
+                "{field}"
+            );
+            assert_eq!(
+                settings.language,
+                if field == "language" {
+                    None
+                } else {
+                    Some(Language::En)
+                },
+                "{field}"
+            );
+        }
+    }
+
+    #[test]
+    fn load_migrates_legacy_settings_and_rejects_invalid_documents() {
+        let dir = std::env::temp_dir().join(format!(
+            "mattepulp-load-test-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let current = dir.join("Sue-Paper/settings.json");
+        let legacy = dir.join("paperman-rs/settings.json");
+        std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        for (texture, intensity) in [
+            ("ClassicMatte", 15),
+            ("WhisperWeave", 20),
+            ("Parchment", 25),
+            ("VellumMist", 30),
+        ] {
+            std::fs::write(
+                &legacy,
+                format!(r#"{{"enabled":false,"texture":"{texture}","intensity":{intensity}}}"#),
+            )
+            .unwrap();
+            let loaded = Settings::load_from_paths(&current, &legacy);
+            assert!(!loaded.enabled);
+            assert_eq!(loaded.intensity, intensity);
+            assert_eq!(serde_json::to_value(loaded.texture).unwrap(), texture);
+            assert_eq!(Settings::load_from_paths(&current, &legacy), loaded);
+            std::fs::remove_file(&current).unwrap();
+        }
+        for text in ["{", "[]", "null", "42"] {
+            std::fs::write(&current, text).unwrap();
+            assert_eq!(
+                Settings::load_from_paths(&current, &legacy),
+                Settings::default()
+            );
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
