@@ -19,7 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         .appendingPathComponent("Sue-Paper", isDirectory: true)
       } else {
-        fputs("Usage: Sue-Paper [--smoke-test TEMPORARY_SETTINGS_DIRECTORY]\n", stderr)
+        fputs("Usage: MattePulp (Sue-Paper) [--smoke-test TEMPORARY_SETTINGS_DIRECTORY]\n", stderr)
         exit(2)
       }
       guard let resources = Bundle.main.resourceURL else { exit(1) }
@@ -36,7 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     } catch {
       controller?.shutdown()
       fputs(
-        "Sue-Paper could not start (\((error as NSError).code)). Check app resources and settings storage.\n",
+        "MattePulp could not start (\((error as NSError).code)). Check app resources and settings storage.\n",
         stderr)
       exit(1)
     }

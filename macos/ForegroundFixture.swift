@@ -8,7 +8,7 @@ final class ForegroundFixtureDelegate: NSObject, NSApplicationDelegate {
     let window = NSWindow(
       contentRect: NSRect(x: 150, y: 150, width: 500, height: 300),
       styleMask: [.titled], backing: .buffered, defer: false)
-    window.title = "Sue-Paper synthetic foreground fixture"
+    window.title = "MattePulp synthetic foreground fixture"
     window.backgroundColor = .white
     window.makeKeyAndOrderFront(nil)
     self.window = window

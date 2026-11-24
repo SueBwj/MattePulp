@@ -1,4 +1,4 @@
-//! Sue-Paper：Windows 屏幕纸张纹理覆盖工具（界面名称为柔纸 / MattePulp）
+//! MattePulp：Windows 屏幕纸张纹理覆盖工具（界面名称为柔纸 / MattePulp）
 //! 核心功能包括全屏程序生成纸张纹理、鼠标键盘穿透、
 //! 托盘控制、简体中文或英文菜单、应用排除列表、打盹、多显示器。
 //! 可执行文件名仍是 sue-paper。
@@ -514,7 +514,7 @@ fn run() -> windows::core::Result<()> {
 
 fn main() {
     if let Err(error) = run() {
-        eprintln!("Sue-Paper failed: {error}");
+        eprintln!("MattePulp failed: {error}");
     }
 }
 

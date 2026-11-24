@@ -113,7 +113,7 @@ final class AppController: NSObject, NSMenuDelegate {
   private func record(_ error: Error, notice: MenuNotice) {
     lastError = notice
     // Avoid logging app identities, paths, or other desktop metadata.
-    fputs("Sue-Paper: \(notice.logSummary) (\((error as NSError).code))\n", stderr)
+    fputs("MattePulp: \(notice.logSummary) (\((error as NSError).code))\n", stderr)
   }
 
   private func refreshChrome(_ text: MenuText) {

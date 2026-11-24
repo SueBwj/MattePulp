@@ -8,36 +8,28 @@
 
 **MattePulp covers the screen with a generated paper texture so a bright display reads like matte paper.**
 
-The Chinese name is 柔纸. The repository, the Windows executable, and the Mac bundle stay named sue-paper, so existing download URLs, settings folders, and texture ids stay put. The Windows app is a portable tray program. The Mac app is a native Apple Silicon menu-bar program. Both use the same texture engine.
-
 <p align="center">
-  <img src="assets/showcase1.png" width="32%" alt="Paper grain over a reading page. The page is third-party writing.">
-  <img src="assets/showcase2.png" width="32%" alt="The same reading page with a highlighted passage. Those words are not part of MattePulp.">
-  <img src="assets/showcase3.png" width="32%" alt="A later page in that reading view, still under the paper grain.">
+  <img src="assets/showcase1.png" width="32%" alt="Paper grain over a reading page">
+  <img src="assets/showcase2.png" width="32%" alt="The same reading page with a highlighted passage under the grain">
+  <img src="assets/showcase3.png" width="32%" alt="A later page in the same reading view, still under the grain">
 </p>
-
-The writing in these pictures belongs to its authors. MattePulp adds the grain. It does not claim the words or the reading app.
 
 ## Download
 
-Download a published package first. The source changes below are not inside those packages.
+Download a published package first. The bilingual menus in this source tree are not in those packages yet.
 
 | System | Release | File |
 |---|---|---|
 | Windows x64 | [v0.1.0](https://github.com/SueBwj/sue-paper/releases/tag/v0.1.0) stable | [sue-paper-v0.1.0-windows-x64.zip](https://github.com/SueBwj/sue-paper/releases/download/v0.1.0/sue-paper-v0.1.0-windows-x64.zip) |
 | Mac Apple Silicon | [v0.1.1-macos.1](https://github.com/SueBwj/sue-paper/releases/tag/v0.1.1-macos.1) prerelease | [Sue-Paper-macOS-arm64-local-d9fb2c7.dmg](https://github.com/SueBwj/sue-paper/releases/download/v0.1.1-macos.1/Sue-Paper-macOS-arm64-local-d9fb2c7.dmg) |
 
-Windows v0.1.0 is commit `53b266a`. That build is named Sue-Paper, uses the older tray image `assets/logo-s-64.bgra`, and has neither the language menu nor the current translucent paper icon.
-
-The Mac prerelease is commit `d9fb2c7` and is Apple Silicon only. Its disk image already uses the translucent paper icon. Menu items still carry Chinese and English together, it has no separate language choice, and it is not notarized. Gatekeeper may block a downloaded copy.
-
-In this source tree the Windows tray and the Mac menu bar show 柔纸 or MattePulp and each has its own language menu. That interface has no new package yet. The Mac menu-bar mark stays S, and intensity stays on four steps.
+Windows v0.1.0 (`53b266a`) still has the older tray art and a single-language UI with no language menu. The Mac prerelease (`d9fb2c7`, Apple Silicon only) already uses the current translucent paper icon, but menus stay mixed Chinese/English with no separate language item. The disk image is ad-hoc signed and not notarized; Gatekeeper may block a network download. Older `settings.json` files without a `language` field still load.
 
 ## Usage
 
-The texture covers every screen. The pointer and the keyboard pass through it. It does not take focus or appear in window switching. Mac display limits are in the [Mac notes](macos/README.md#display-behavior).
+The texture covers every screen. The pointer and keyboard pass through it; it does not take focus or appear in window switching. Mac display limits are in the [Mac notes](macos/README.md#display-behavior).
 
-Four textures come from fractal noise and tile without a seam. Windows intensity is still the four steps 15%, 20%, 25%, and 30%. Texture ids in the settings file are unchanged.
+Four textures come from fractal noise and tile without a seam. Intensity steps and texture ids match the published packages (table below).
 
 | Settings id | English menu | Chinese menu | Character |
 |---|---|---|---|
@@ -50,26 +42,11 @@ In a Windows build from this source, the Snooze menu adds "Resume now" while sno
 
 ![Four textures over the same horizontal lines](showcase/textures.png)
 
-**Windows.** Unzip the stable package and run `sue-paper.exe`. When you build this source tree, right-click the tray icon. Each time the menu opens it is rebuilt in one language:
+**Windows.** Unzip the stable package and run `sue-paper.exe`. When you build this source tree, right-click the tray icon: enable texture, texture/intensity/snooze, exclude the current app, language (中文 or English), and quit. The tray tip is 柔纸 in Chinese and MattePulp in English. Settings live in `%APPDATA%\Sue-Paper\settings.json`.
 
-- Enable paper texture
-- Texture, Intensity, and Snooze for 5 or 15 minutes
-- Exclude the current app. An exclusion is the foreground process file name, such as `photos.exe`
-- Language: 中文 or English
-- Quit
+**Mac.** The published image still has the mixed menu. Build `Sue-Paper.app` from this source and click **S** in the menu bar for a one-language menu with a separate language item. Finder shows MattePulp; the executable remains `Sue-Paper`. Settings live in `~/Library/Application Support/Sue-Paper/settings.json`. The app asks for neither Accessibility nor Screen Recording permission.
 
-The tray tip and the hidden window title are 柔纸 in Chinese and MattePulp in English. After you choose a language the tip changes immediately, and the next menu is entirely in that language. The language names stay 中文 and English, so either menu can be used to switch back.
-
-Older settings with no `language` field still load. The menu then follows the Windows UI language. `zh-Hans`, `zh-CN`, `zh-SG`, and `zh-CHS` select Simplified Chinese. Traditional Chinese and every other language select English. A choice is stored as `language` with the value `zh-Hans` or `en`, and the next launch keeps it. The file remains `%APPDATA%\Sue-Paper\settings.json`.
-
-**Mac.** The published disk image still has the mixed-language menu described above. Build `Sue-Paper.app` from this source and click **S** in the menu bar. Each time the menu opens it uses one language: Enable paper texture, Texture, Intensity, Language, Snooze for 5 or 15 minutes, Exclude or Include, and Quit MattePulp. While snoozing, the menu adds "Resume now". Intensity remains 15%, 20%, 25%, and 30%. With no `language` field, the menu follows the system UI language using the same rules as Windows; a choice is stored in the same `language` value. The menu-bar tip and accessibility name switch immediately to 柔纸 or MattePulp, while the visible mark stays S. Exclusions use a bundle identifier, or the executable URL when there is no bundle identifier. The app asks for neither Accessibility nor Screen Recording permission. Settings remain `~/Library/Application Support/Sue-Paper/settings.json`. Finder shows the display name MattePulp, and the executable remains `Sue-Paper`.
-
-## Compatibility
-
-- The published Windows package is 64-bit. An older `settings.json` with no language field still loads. The intensity steps are unchanged.
-- The published Mac package is Apple Silicon and needs macOS 12 or newer. v0.1.1-macos.1 is ad-hoc signed and not notarized.
-- The bundle identifier remains `com.suebwj.sue-paper`. The Mac executable remains `Sue-Paper`. The Windows executable remains `sue-paper.exe`.
-- The running program uses about 22-27 MB of memory. A still texture does not keep using CPU; it is redrawn when you change it. Overlays are rebuilt when the displays change. Those figures describe the existing Windows program.
+With no saved language, the menu follows the system UI language. A choice is stored as `language` (`zh-Hans` or `en`); Windows and Mac use the same rules.
 
 ## Build and test
 
@@ -81,9 +58,7 @@ Requires Rust stable (`stable-x86_64-pc-windows-gnu` or MSVC):
 ./build-release.ps1
 ```
 
-The script writes `target/release/sue-paper.exe`, embeds `assets/sue-paper.ico` into the executable's icon resource, and copies the repository `LICENSE` next to the executable. Ship that `LICENSE` with `sue-paper.exe`. Do not archive the whole `target\release` directory. Tray pixels come from `assets/app-icon-64.bgra`, which is embedded at compile time. Those three icon files are the current translucent paper art, not the older art in v0.1.0.
-
-Format, lint, and test on Windows:
+The script writes `target/release/sue-paper.exe`, embeds `assets/sue-paper.ico`, and copies the repository `LICENSE` beside the executable. Ship only `sue-paper.exe` and that `LICENSE`, not the whole `target\release` tree.
 
 ```sh
 cargo fmt -- --check
@@ -91,19 +66,17 @@ cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
 ```
 
-The `windows` crate stays on 0.58 because that release uses the prebuilt import libraries in `windows-targets`. From 0.60 onward, `windows-link` runs dlltool at build time and needs extra PATH setup on the GNU toolchain, so this project has not moved.
-
 ### macOS (Apple Silicon)
 
-Requires macOS 12 or newer, Rust stable, and Xcode 16 or newer, with Swift 6 and `swift-format` available through `xcrun`:
+Requires macOS 12+, Rust stable, and Xcode 16+ (`xcrun` must find Swift 6 and `swift-format`):
 
 ```sh
-./build-macos.sh /tmp/sue-paper-build
-./test-macos.sh /tmp/sue-paper-build
-open /tmp/sue-paper-build/Sue-Paper.app
+./build-macos.sh /tmp/mattepulp-build
+./test-macos.sh /tmp/mattepulp-build
+open /tmp/mattepulp-build/Sue-Paper.app
 ```
 
-Use a fresh output directory for each build. The outputs are `Sue-Paper.app` and `sue-paper-macos-arm64.zip`. The script places `LICENSE` in `Contents/Resources` before the ad-hoc signature. Running the app does not require Rust. Quit from the **S** menu. Tests use temporary settings and synthetic windows, enter fullscreen briefly, and then close those windows. They do not capture the desktop. The tested environment and the display and Spaces limits are in the [Mac build and validation notes](macos/README.md).
+Use a fresh output directory each time. Outputs are `Sue-Paper.app` and `sue-paper-macos-arm64.zip`; `LICENSE` is in `Contents/Resources`, with an ad-hoc signature. Tests use temporary settings and synthetic windows and do not capture the desktop. See the [Mac build and validation notes](macos/README.md).
 
 | File | Responsibility |
 |---|---|
