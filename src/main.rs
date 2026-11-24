@@ -553,4 +553,26 @@ mod tests {
             foreground_is_excluded(&exclusions, Some("notes.exe")),
         ));
     }
+
+    /// 基线复现：旧实现以固定名 `Local\SuePaper.SingleInstance` 的命名
+    /// Mutex 做单实例，身份与设置目录无关：任意两个实例（即使 APPDATA
+    /// 指向不同设置目录）也会被 `ERROR_ALREADY_EXISTS` 挡住。这里用同一
+    /// Win32 调用复现当时的互斥来源，作为“单实例身份必须绑定设置目录”
+    /// 的对照证据。
+    #[test]
+    fn baseline_fixed_mutex_ignored_the_settings_directory() {
+        use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS};
+        use windows::Win32::System::Threading::CreateMutexW;
+
+        let name = windows::core::w!("Local\\SuePaper.SingleInstance");
+        let first = unsafe { CreateMutexW(None, false, name) }.unwrap();
+        // 同名即冲突：第二把句柄有效，但 GetLastError 已标记“已存在”，
+        // 与 APPDATA/设置目录毫无关系。
+        let second = unsafe { CreateMutexW(None, false, name) }.unwrap();
+        assert!(unsafe { GetLastError() } == ERROR_ALREADY_EXISTS);
+        unsafe {
+            let _ = CloseHandle(first);
+            let _ = CloseHandle(second);
+        }
+    }
 }
