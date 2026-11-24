@@ -46,6 +46,16 @@ In a Windows build from this source, the Snooze menu adds "Resume now" while sno
 
 **Mac.** The published image still has the mixed menu. Build `Sue-Paper.app` from this source and click **S** in the menu bar for a one-language menu with a separate language item. Finder shows MattePulp; the executable remains `Sue-Paper`. Settings live in `~/Library/Application Support/Sue-Paper/settings.json`. The app asks for neither Accessibility nor Screen Recording permission.
 
+### Schedule & Sunset
+
+Open **Schedule & Sunset…** from the Windows tray or macOS menu bar in a build from source. Each rule starts disabled and can be switched on or off separately. Edit and save both rules in the same window, which shows current coverage and the estimated local time of the next automatic change.
+
+- **Daily schedule** follows the system's local clock. Enter `HH:mm` in 24-hour format. The start minute is inclusive and the end minute is exclusive. An earlier end crosses midnight. Equal or malformed times make this rule unavailable. During daylight saving changes, both occurrences of a repeated minute are evaluated independently, and the first actual minute after a gap is evaluated as displayed.
+- **Sunset** runs from sunset to the following sunrise. Enter decimal degrees from −90 to 90 for latitude and −180 to 180 for longitude, with positive values for north and east. Coordinates stay in the existing settings file on this device. Solar events follow the solar day at the entered longitude and are shown in the system time zone. Missing or invalid coordinates, or missing events needed to determine the current daylight or overnight interval, make the sunset rule unavailable. The estimate uses [NOAA GML's published equations](https://gml.noaa.gov/grad/solcalc/solareqns.PDF) rounded to the nearest minute. Atmosphere, terrain and high latitudes can widen the difference from observed events. [NOAA GML terms of use](https://gml.noaa.gov/about/disclaimer.html)
+- **Either rule** can allow coverage. A daily window from 21:00 to 06:00 and sunset coverage from 18:10 to 06:45 allow coverage from 18:10 to 06:45. Manual disable, snooze and foreground app exclusions always hide the overlay. When all rules are disabled or unavailable, the manual setting applies.
+
+MattePulp reevaluates against the current clock at startup, after waking, and after clock or time zone changes. The preview looks 48 hours ahead for the first change in the combined automatic rules, independent of manual disable, snooze and exclusions. If saving fails, the applied settings stay in effect and the window retains the edits for a retry.
+
 With no saved language, the menu follows the system UI language. A choice is stored as `language` (`zh-Hans` or `en`); Windows and Mac use the same rules.
 
 ## Build and test

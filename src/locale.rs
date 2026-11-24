@@ -8,8 +8,8 @@ use windows::Win32::Globalization::{
 
 use crate::texture::KIND_NAMES;
 use crate::{
-    ID_EXCLUDE, ID_EXIT, ID_INT_BASE, ID_LANG_EN, ID_LANG_ZH, ID_RESUME, ID_SNOOZE_15, ID_SNOOZE_5,
-    ID_TEX_BASE, ID_TOGGLE, INTENSITIES,
+    ID_EXCLUDE, ID_EXIT, ID_INT_BASE, ID_LANG_EN, ID_LANG_ZH, ID_RESUME, ID_SCHEDULE, ID_SNOOZE_15,
+    ID_SNOOZE_5, ID_TEX_BASE, ID_TOGGLE, INTENSITIES,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -113,6 +113,7 @@ pub struct MenuCopy {
     pub resume: &'static str,
     pub exclude_empty: &'static str,
     pub language_menu: &'static str,
+    pub schedule_title: &'static str,
     pub quit: &'static str,
 }
 
@@ -130,6 +131,7 @@ pub fn menu_copy(language: Language) -> MenuCopy {
             resume: "立即恢复",
             exclude_empty: "排除当前应用",
             language_menu: "语言",
+            schedule_title: "定时与日落",
             quit: "退出",
         },
         Language::En => MenuCopy {
@@ -144,6 +146,7 @@ pub fn menu_copy(language: Language) -> MenuCopy {
             resume: "Resume now",
             exclude_empty: "Exclude current app",
             language_menu: "Language",
+            schedule_title: "Schedule & Sunset",
             quit: "Quit",
         },
     }
@@ -324,6 +327,12 @@ pub fn menu_model(request: &MenuRequest<'_>) -> Vec<MenuNode> {
             ],
         },
         MenuNode::Separator,
+        MenuNode::Command {
+            id: ID_SCHEDULE,
+            label: format!("{}…", copy.schedule_title.replace('&', "&&")),
+            checked: false,
+            enabled: true,
+        },
         exclude,
         MenuNode::Separator,
         MenuNode::Command {
