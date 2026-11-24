@@ -11,6 +11,7 @@ struct Settings: Codable, Equatable {
   var exclusions: [String] = []
   /// Saved interface language. Nil follows the system UI language.
   var language: String?
+  var schedule = ScheduleSettings()
 
   init() {}
 
@@ -21,6 +22,7 @@ struct Settings: Codable, Equatable {
     intensity = try values.decodeIfPresent(Int.self, forKey: .intensity) ?? Self.defaultIntensity
     exclusions = try values.decodeIfPresent([String].self, forKey: .exclusions) ?? []
     language = try values.decodeIfPresent(String.self, forKey: .language)
+    schedule = (try? values.decode(ScheduleSettings.self, forKey: .schedule)) ?? ScheduleSettings()
     normalize()
   }
 
@@ -56,8 +58,14 @@ struct Settings: Codable, Equatable {
 struct Visibility {
   var snoozeUntil: Date?
 
-  func isVisible(settings: Settings, foreground: String?, now: Date = Date()) -> Bool {
-    settings.enabled && (snoozeUntil.map { $0 <= now } ?? true)
-      && !settings.exclusions.contains(foreground ?? "")
+  func isSnoozed(at now: Date) -> Bool { snoozeUntil.map { $0 > now } ?? false }
+
+  func isVisible(
+    settings: Settings, foreground: String?, now: Date = Date(), zone: TimeZone = .current
+  ) -> Bool {
+    settings.schedule.evaluate(
+      now: now, zone: zone, manual: settings.enabled,
+      suppressed: isSnoozed(at: now) || settings.exclusions.contains(foreground ?? "")
+    ).visible != 0
   }
 }

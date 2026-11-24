@@ -19,6 +19,7 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
   private(set) var intensityPanel: IntensityPanel?
   /// Optional override used by non-intrusive synthetic fixtures to host the real panel offscreen.
   var presentIntensityPanel: ((IntensityPanel, NSPoint) -> Void)?
+  var presentScheduleWindow: ((NSWindow) -> Void)?
   /// Injectable only for synthetic tests so exclusion checks never inspect unrelated user apps.
   var foregroundIdentityProvider: () -> String? = {
     AppController.identity(NSWorkspace.shared.frontmostApplication)
@@ -26,6 +27,8 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
   private var lock: Int32 = -1
   private var observers: [(NotificationCenter, NSObjectProtocol)] = []
   private var snoozeTimer: Timer?
+  private var scheduleTimer: Timer?
+  private(set) var scheduleWindow: ScheduleWindow?
   private var menuForeground: String?
 
   init(settingsDirectory: URL, resources: URL) throws {
@@ -78,6 +81,9 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
     ] {
       observe(workspace, name) { controller, _ in controller.applyVisibility() }
     }
+    for name in [NSNotification.Name.NSSystemClockDidChange, .NSSystemTimeZoneDidChange] {
+      observe(.default, name) { controller, _ in controller.applyVisibility() }
+    }
   }
 
   private func observe(
@@ -118,13 +124,48 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
   }
 
   private func applyVisibility(foreground: String?) {
-    let visible = visibility.isVisible(
-      settings: settings,
-      foreground: foreground)
+    updateVisibility(foreground: foreground, reorder: true)
+  }
+
+  private func updateVisibility(foreground: String?, reorder: Bool) {
+    updateScheduleTimer()
+    let now = Date()
+    let zone = TimeZone.current
+    let snoozed = visibility.isSnoozed(at: now)
+    let excluded = foreground.map(settings.exclusions.contains) ?? false
+    let result = settings.schedule.evaluate(
+      now: now, zone: zone, manual: settings.enabled, suppressed: snoozed || excluded)
+    let visible = result.visible != 0
     for overlay in overlays {
+      guard reorder || overlay.isVisible != visible else { continue }
       if visible { overlay.orderFrontRegardless() } else { overlay.orderOut(nil) }
     }
     statusItem?.button?.appearsDisabled = !visible
+    if let panel = scheduleWindow, panel.window?.isVisible == true {
+      panel.refresh(
+        result, settings: settings.schedule, now: now, zone: zone, manual: settings.enabled,
+        snoozed: snoozed, excluded: excluded)
+    }
+  }
+
+  private func updateScheduleTimer() {
+    guard
+      settings.schedule.timed || settings.schedule.sunset
+        || scheduleWindow?.window?.isVisible == true
+    else {
+      scheduleTimer?.invalidate()
+      scheduleTimer = nil
+      return
+    }
+    guard scheduleTimer == nil else { return }
+    let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
+      MainActor.assumeIsolated {
+        self?.updateVisibility(
+          foreground: self?.foregroundIdentityProvider(), reorder: false)
+      }
+    }
+    scheduleTimer = timer
+    RunLoop.main.add(timer, forMode: .common)
   }
 
   private func record(_ error: Error, notice: MenuNotice) {
@@ -139,7 +180,8 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
     statusItem?.menu?.title = text.product
   }
 
-  private func change(_ updated: Settings) {
+  @discardableResult
+  private func change(_ updated: Settings) -> Bool {
     do {
       var images = intensityImages
       if updated.texture != settings.texture {
@@ -156,7 +198,11 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
       lastError = nil
       refreshChrome(MenuText.resolved(saved: settings.language))
       applyVisibility()
-    } catch { record(error, notice: .saveFailed) }
+      return true
+    } catch {
+      record(error, notice: .saveFailed)
+      return false
+    }
   }
 
   @objc func toggle() {
@@ -305,6 +351,28 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
     change(updated)
   }
 
+  @objc func showSchedule() {
+    if scheduleWindow?.window?.isVisible != true {
+      let language = MenuText.resolved(saved: settings.language).language
+      scheduleWindow = ScheduleWindow(language: language, settings: settings.schedule) {
+        [weak self] rules in
+        guard let self else { return false }
+        var updated = self.settings
+        updated.schedule = rules
+        return self.change(updated)
+      }
+    }
+    if let window = scheduleWindow?.window {
+      if let presentScheduleWindow {
+        presentScheduleWindow(window)
+      } else {
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+      }
+    }
+    applyVisibility()
+  }
+
   @objc func quit() { NSApp.terminate(nil) }
 
   func menuNeedsUpdate(_ menu: NSMenu) {
@@ -351,6 +419,7 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
     }
     submenu(text.languageMenu, languageMenu)
     menu.addItem(.separator())
+    item(ScheduleWindow.title(text.language) + "…", #selector(showSchedule))
     item(text.snooze5, #selector(snooze(_:)), tag: 5)
     item(text.snooze15, #selector(snooze(_:)), tag: 15)
     if visibility.snoozeUntil.map({ $0 > Date() }) == true {
@@ -379,6 +448,10 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
     intensityPanel = nil
     snoozeTimer?.invalidate()
     snoozeTimer = nil
+    scheduleTimer?.invalidate()
+    scheduleTimer = nil
+    scheduleWindow?.close()
+    scheduleWindow = nil
     for (center, token) in observers { center.removeObserver(token) }
     observers.removeAll()
     for overlay in overlays { overlay.close() }
