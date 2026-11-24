@@ -46,6 +46,8 @@ Four textures come from fractal noise and tile without a seam. Windows intensity
 | Parchment | Sunbaked Parchment | 羊皮纸 | Warm, heavier grain |
 | VellumMist | Vellum Mist | 薄纱雾面 | A light haze |
 
+In a Windows build from this source, the Snooze menu adds "Resume now" while snoozing, which ends that snooze immediately. Snooze is not written to settings. When the foreground app is already excluded, the menu offers to include it, and the change takes effect immediately. The v0.1.0 package does not include these two actions.
+
 ![Four textures over the same horizontal lines](showcase/textures.png)
 
 **Windows.** Unzip the stable package and run `sue-paper.exe`. When you build this source tree, right-click the tray icon. Each time the menu opens it is rebuilt in one language:
