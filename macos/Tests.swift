@@ -258,7 +258,7 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
   var fullscreenEntered = false
   var foregroundFixture: Process?
   var dragSamples: [(shown: Int?, persisted: Int, disk: Int?)] = []
-  var dragCellTrace: [String] = []
+  var usedProgrammaticCellDrag = false
   var dragScript: [(value: Double, up: Bool)] = []
   var dragTick = 0
   var dragSampler: Timer?
@@ -490,13 +490,20 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     return (minKnob.midX, maxKnob.midX, minKnob.midY)
   }
 
+  func sliderPoint(
+    _ value: Double, of slider: NSSlider,
+    geometry: (minX: CGFloat, maxX: CGFloat, midY: CGFloat)
+  ) -> NSPoint {
+    let fraction = (value - slider.minValue) / max(slider.maxValue - slider.minValue, 1)
+    return NSPoint(
+      x: geometry.minX + CGFloat(fraction) * (geometry.maxX - geometry.minX), y: geometry.midY)
+  }
+
   func makeMouseEvent(
     _ type: NSEvent.EventType, value: Double, to slider: NSSlider,
     geometry: (minX: CGFloat, maxX: CGFloat, midY: CGFloat)
   ) -> NSEvent {
-    let fraction = (value - slider.minValue) / max(slider.maxValue - slider.minValue, 1)
-    let point = NSPoint(
-      x: geometry.minX + CGFloat(fraction) * (geometry.maxX - geometry.minX), y: geometry.midY)
+    let point = sliderPoint(value, of: slider, geometry: geometry)
     let event = NSEvent.mouseEvent(
       with: type, location: slider.convert(point, to: nil),
       modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
@@ -504,6 +511,28 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
       clickCount: 1, pressure: 1)
     require(event != nil, "synthetic drag event created")
     return event!
+  }
+
+  func assertDragOutcome(
+    _ view: IntensitySliderView, from start: Int, to end: Int,
+    samples: [(shown: Int?, persisted: Int, disk: Int?)]
+  ) {
+    let slider = view.slider
+    require(
+      controller.settings.intensity == end && view.percent == end
+        && controller.previewIntensity == nil
+        && view.percentLabel.stringValue == "\(end)%"
+        && slider.accessibilityValueDescription() == "\(end)%"
+        && currentOverlayIntensity() == end,
+      "drag release commits final intensity \(end) and synchronizes UI and overlay")
+    let persisted = try? Settings.load(from: controller.settingsURL)
+    require(persisted?.intensity == end, "drag release persists \(end) to disk")
+    require(
+      samples.allSatisfy { $0.persisted == start && $0.disk == start },
+      "no per-tick writes while the drag previews from \(start) to \(end)")
+    require(
+      samples.contains { $0.shown != nil && $0.shown != start && $0.shown != end },
+      "drag previews intermediate levels on screen before release")
   }
 
   func exerciseDrag(
@@ -516,13 +545,35 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     require(panel.isVisible && controller.intensityPanel === panel, "panel stays open before drag")
     let geometry = knobTrackGeometry(of: slider)
     let down = makeMouseEvent(.leftMouseDown, value: Double(start), to: slider, geometry: geometry)
-    let downLoc = down.locationInWindow
-    let hit = panel.contentView?.hitTest(downLoc)
-    require(
-      hit === slider,
-      "drag start hits native slider (hit=\(String(describing: hit)) loc=\(down.locationInWindow))")
-    dragCellTrace = []
-    cell.onTrace = { [weak self] entry in self?.dragCellTrace.append(entry) }
+    let hit = panel.contentView?.hitTest(down.locationInWindow)
+    require(hit === slider, "drag start hits native slider")
+    if slider.gestureRecognizers.isEmpty {
+      // On macOS 15, NSSlider uses NSCell.trackMouse without a gesture recognizer and ends
+      // tracking at mouse-down when no physical mouse button is held (pressedMouseButtons == 0).
+      // Verify real window hit-testing on mouse-down, then drive NSSliderCell tracking
+      // programmatically to test preview, zero-write drag ticks, and release persistence.
+      usedProgrammaticCellDrag = true
+      panel.sendEvent(down)
+      var samples: [(shown: Int?, persisted: Int, disk: Int?)] = []
+      var previous = sliderPoint(Double(start), of: slider, geometry: geometry)
+      require(cell.startTracking(at: previous, in: slider), "cell starts tracking at drag origin")
+      slider.sendAction(slider.action, to: slider.target)
+      for value in stops + [end] {
+        let next = sliderPoint(Double(value), of: slider, geometry: geometry)
+        require(
+          cell.continueTracking(last: previous, current: next, in: slider),
+          "cell continues tracking through \(value)")
+        slider.sendAction(slider.action, to: slider.target)
+        let shown = currentOverlayIntensity()
+        let disk = (try? Settings.load(from: controller.settingsURL))?.intensity
+        samples.append((shown, controller.settings.intensity, disk))
+        previous = next
+      }
+      cell.stopTracking(last: previous, current: previous, in: slider, mouseIsUp: true)
+      assertDragOutcome(view, from: start, to: end, samples: samples)
+      done()
+      return
+    }
     dragSamples = []
     // Real drags emit leftMouseDragged at the target coordinate before leftMouseUp releases there.
     dragScript = stops.map { (value: Double($0), up: false) }
@@ -545,143 +596,14 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         } else if self.dragTick >= scriptCount + 4 {
           self.dragSampler?.invalidate()
           self.dragSampler = nil
-          cell.onTrace = nil
-          let samples = self.dragSamples
-          let dragOK =
-            self.controller.settings.intensity == end && view.percent == end
-            && self.controller.previewIntensity == nil
-            && view.percentLabel.stringValue == "\(end)%"
-            && slider.accessibilityValueDescription() == "\(end)%"
-            && self.currentOverlayIntensity() == end
-          if !dragOK {
-            self.logDragDiagnostics(
-              panel: panel, slider: slider, geometry: geometry, downLoc: downLoc,
-              cellTrace: self.dragCellTrace)
-          }
-          require(
-            dragOK,
-            "drag release commits final intensity \(end) and synchronizes UI and overlay"
-              + " (settings=\(self.controller.settings.intensity) shown=\(view.percent)"
-              + " preview=\(String(describing: self.controller.previewIntensity))"
-              + " label=\(view.percentLabel.stringValue)"
-              + " ax=\(String(describing: slider.accessibilityValueDescription()))"
-              + " overlay=\(String(describing: self.currentOverlayIntensity()))"
-              + " samples=\(samples))")
-          let persisted = try? Settings.load(from: self.controller.settingsURL)
-          require(persisted?.intensity == end, "drag release persists \(end) to disk")
-          require(
-            samples.allSatisfy { $0.persisted == start && $0.disk == start },
-            "no per-tick writes while the drag previews from \(start) to \(end)")
-          require(
-            samples.contains { $0.shown != nil && $0.shown != start && $0.shown != end },
-            "drag previews intermediate levels on screen before release")
+          self.assertDragOutcome(view, from: start, to: end, samples: self.dragSamples)
           done()
         }
       }
     }
     RunLoop.main.add(sampler, forMode: .common)
     dragSampler = sampler
-    // Dispatch mouseDown, drags, and mouseUp through IntensityPanel.sendEvent so NSWindow
-    // hit-testing and NSSlider's gesture/cell tracking run identically on macOS 15 and 26.
     panel.sendEvent(down)
-  }
-
-  /// Failure-only synthetic diagnostic to distinguish AppKit mouseDown/drag/up delivery
-  /// across macOS versions without changing test pass/fail outcomes or touching the desktop.
-  func logDragDiagnostics(
-    panel: IntensityPanel, slider: NSSlider,
-    geometry: (minX: CGFloat, maxX: CGFloat, midY: CGFloat),
-    downLoc: NSPoint, cellTrace: [String]
-  ) {
-    let os = ProcessInfo.processInfo.operatingSystemVersionString
-    let downInSlider = slider.convert(downLoc, from: nil)
-    fputs(
-      "DIAG-ENV: os=\(os) panelFrame=\(panel.frame) visible=\(panel.isVisible)"
-        + " key=\(panel.isKeyWindow) appActive=\(NSApp.isActive)"
-        + " pressed=\(NSEvent.pressedMouseButtons) sliderFrame=\(slider.frame)"
-        + " bounds=\(slider.bounds) flipped=\(slider.isFlipped)"
-        + " recognizers=\(slider.gestureRecognizers.count)"
-        + " geom=\(geometry) downLoc=\(downLoc) inSlider=\(downInSlider)\n",
-      stderr)
-    fputs("DIAG-TRACE: \(cellTrace)\n", stderr)
-
-    func runProbe(
-      _ name: String, nonactivating: Bool,
-      drive: (
-        NSWindow, IntensitySliderView, TrackingSliderCell,
-        (minX: CGFloat, maxX: CGFloat, midY: CGFloat)
-      ) -> Void
-    ) {
-      let probeView = IntensitySliderView(intensity: 21)
-      let probeCell = probeView.slider.cell as! TrackingSliderCell
-      var trace: [String] = []
-      probeCell.onTrace = { entry in trace.append(entry) }
-      let mask: NSWindow.StyleMask =
-        nonactivating ? [.titled, .closable, .nonactivatingPanel] : [.titled, .closable]
-      let win: NSWindow =
-        nonactivating
-        ? NSPanel(
-          contentRect: NSRect(x: -10000, y: -10000, width: 268, height: 68),
-          styleMask: mask, backing: .buffered, defer: false)
-        : NSWindow(
-          contentRect: NSRect(x: -10000, y: -10000, width: 268, height: 68),
-          styleMask: mask, backing: .buffered, defer: false)
-      win.contentView = probeView
-      win.orderBack(nil)
-      win.layoutIfNeeded()
-      let geom = knobTrackGeometry(of: probeView.slider)
-      drive(win, probeView, probeCell, geom)
-      fputs("DIAG-PROBE[\(name)]: final=\(probeView.percent) trace=\(trace)\n", stderr)
-      win.close()
-    }
-
-    runProbe("NSWindow-sendEvent", nonactivating: false) { win, v, _, g in
-      win.sendEvent(makeMouseEvent(.leftMouseDown, value: 19, to: v.slider, geometry: g))
-      win.sendEvent(makeMouseEvent(.leftMouseDragged, value: 18, to: v.slider, geometry: g))
-      win.sendEvent(makeMouseEvent(.leftMouseDragged, value: 17, to: v.slider, geometry: g))
-      win.sendEvent(makeMouseEvent(.leftMouseUp, value: 17, to: v.slider, geometry: g))
-    }
-    runProbe("Panel-sendEvent-down19", nonactivating: true) { win, v, _, g in
-      win.sendEvent(makeMouseEvent(.leftMouseDown, value: 19, to: v.slider, geometry: g))
-      win.sendEvent(makeMouseEvent(.leftMouseDragged, value: 18, to: v.slider, geometry: g))
-      win.sendEvent(makeMouseEvent(.leftMouseDragged, value: 17, to: v.slider, geometry: g))
-      win.sendEvent(makeMouseEvent(.leftMouseUp, value: 17, to: v.slider, geometry: g))
-    }
-    runProbe("Panel-mouseDown-prequeue", nonactivating: true) { _, v, _, g in
-      NSApp.postEvent(
-        makeMouseEvent(.leftMouseDragged, value: 18, to: v.slider, geometry: g), atStart: false)
-      NSApp.postEvent(
-        makeMouseEvent(.leftMouseDragged, value: 17, to: v.slider, geometry: g), atStart: false)
-      NSApp.postEvent(
-        makeMouseEvent(.leftMouseUp, value: 17, to: v.slider, geometry: g), atStart: false)
-      let downEv = makeMouseEvent(.leftMouseDown, value: 19, to: v.slider, geometry: g)
-      v.slider.mouseDown(with: downEv)
-    }
-    runProbe("Panel-cellTrack-prequeue", nonactivating: true) { _, v, c, g in
-      NSApp.postEvent(
-        makeMouseEvent(.leftMouseDragged, value: 18, to: v.slider, geometry: g), atStart: false)
-      NSApp.postEvent(
-        makeMouseEvent(.leftMouseDragged, value: 17, to: v.slider, geometry: g), atStart: false)
-      NSApp.postEvent(
-        makeMouseEvent(.leftMouseUp, value: 17, to: v.slider, geometry: g), atStart: false)
-      let ok = c.trackMouse(
-        with: makeMouseEvent(.leftMouseDown, value: 19, to: v.slider, geometry: g),
-        in: v.slider.bounds, of: v.slider, untilMouseUp: true)
-      fputs("DIAG-PROBE[Panel-cellTrack-prequeue]: trackMouse=\(ok)\n", stderr)
-    }
-    runProbe("Panel-directStartContStop", nonactivating: true) { _, v, c, g in
-      let pt19 = NSPoint(
-        x: g.minX + CGFloat(4.0 / 15.0) * (g.maxX - g.minX), y: g.midY)
-      let pt18 = NSPoint(
-        x: g.minX + CGFloat(3.0 / 15.0) * (g.maxX - g.minX), y: g.midY)
-      let pt17 = NSPoint(
-        x: g.minX + CGFloat(2.0 / 15.0) * (g.maxX - g.minX), y: g.midY)
-      if c.startTracking(at: pt19, in: v.slider) {
-        _ = c.continueTracking(last: pt19, current: pt18, in: v.slider)
-        _ = c.continueTracking(last: pt18, current: pt17, in: v.slider)
-        c.stopTracking(last: pt17, current: pt17, in: v.slider, mouseIsUp: true)
-      }
-    }
   }
 
   func exerciseCancelAndStorageFailure(_ view: IntensitySliderView) {
@@ -691,8 +613,27 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     require(
       menu.item(at: 2)!.title == interiorTitle,
       "menu row reflects committed interior intensity")
-    // Uncommitted preview cancelled by Escape must revert overlay and leave disk untouched.
-    let panel = view.slider.window as! IntensityPanel
+    // Cancelling an active tracking drag (mouseIsUp == false) reverts overlay and slider UI.
+    let slider = view.slider
+    let cell = slider.cell as! TrackingSliderCell
+    let geometry = knobTrackGeometry(of: slider)
+    let pt17 = sliderPoint(17, of: slider, geometry: geometry)
+    let pt25 = sliderPoint(25, of: slider, geometry: geometry)
+    require(cell.startTracking(at: pt17, in: slider), "cell starts tracking for cancel test")
+    require(cell.continueTracking(last: pt17, current: pt25, in: slider), "cell tracks to 25")
+    slider.sendAction(slider.action, to: slider.target)
+    require(
+      controller.previewIntensity == 25 && currentOverlayIntensity() == 25
+        && controller.settings.intensity == 17,
+      "cancelled drag previews 25 before abort")
+    cell.stopTracking(last: pt25, current: pt25, in: slider, mouseIsUp: false)
+    require(
+      controller.previewIntensity == nil && controller.settings.intensity == 17
+        && view.percent == 17 && currentOverlayIntensity() == 17
+        && (try? Settings.load(from: controller.settingsURL))?.intensity == 17,
+      "aborted tracking reverts overlay and slider UI without writing to disk")
+    // Uncommitted preview cancelled by Escape must also revert overlay and leave disk untouched.
+    let panel = slider.window as! IntensityPanel
     view.percent = 26
     controller.previewIntensity(26)
     require(
@@ -748,9 +689,18 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
       controller.previewIntensity(17)
       controller.commitIntensity()
       controller.intensityPanel?.close()
-      print(
-        "PASS: native slider keyboard, accessibility, continuous drag preview/release (15%, 17%, 30%), cancel revert and storage-failure recovery"
-      )
+      if usedProgrammaticCellDrag {
+        print(
+          "PASS: native slider keyboard, accessibility, programmatic NSSliderCell tracking preview/release (15%, 17%, 30%), cancel revert and storage-failure recovery"
+        )
+        print(
+          "LIMIT: synthetic NSEvent drag on \(ProcessInfo.processInfo.operatingSystemVersionString) exits NSCell.trackMouse at mouse-down when pressedMouseButtons=0; preview/release assertions ran via programmatic NSSliderCell startTracking/continueTracking/stopTracking (not live NSEvent or physical drag)"
+        )
+      } else {
+        print(
+          "PASS: native slider keyboard, accessibility, process-local NSEvent drag preview/release (15%, 17%, 30%), cancel revert and storage-failure recovery"
+        )
+      }
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
         self.exerciseHiddenAdjustment()
       }

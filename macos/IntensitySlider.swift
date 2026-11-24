@@ -40,22 +40,11 @@ final class IntensityPanel: NSPanel {
 final class TrackingSliderCell: NSSliderCell {
   private(set) var isTrackingMouse = false
   var onTrackingEnd: ((_ mouseIsUp: Bool) -> Void)?
-  var onTrace: ((String) -> Void)?
 
   override func startTracking(at startPoint: NSPoint, in controlView: NSView) -> Bool {
     isTrackingMouse = true
     let shouldContinue = super.startTracking(at: startPoint, in: controlView)
-    onTrace?("start(pt=\(startPoint),ok=\(shouldContinue),v=\(Int(doubleValue.rounded())))")
     if !shouldContinue { isTrackingMouse = false }
-    return shouldContinue
-  }
-
-  override func continueTracking(
-    last lastPoint: NSPoint, current currentPoint: NSPoint, in controlView: NSView
-  ) -> Bool {
-    let shouldContinue = super.continueTracking(
-      last: lastPoint, current: currentPoint, in: controlView)
-    onTrace?("cont(cur=\(currentPoint),ok=\(shouldContinue),v=\(Int(doubleValue.rounded())))")
     return shouldContinue
   }
 
@@ -65,7 +54,6 @@ final class TrackingSliderCell: NSSliderCell {
   ) {
     super.stopTracking(last: lastPoint, current: stopPoint, in: controlView, mouseIsUp: flag)
     isTrackingMouse = false
-    onTrace?("stop(pt=\(stopPoint),up=\(flag),v=\(Int(doubleValue.rounded())))")
     onTrackingEnd?(flag)
   }
 }
