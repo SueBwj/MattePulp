@@ -536,7 +536,7 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
           let event = self.makeMouseEvent(
             step.up ? .leftMouseUp : .leftMouseDragged, value: step.value, to: slider,
             geometry: geometry)
-          NSApp.postEvent(event, atStart: false)
+          panel.sendEvent(event)
         } else if self.dragTick >= scriptCount + 4 {
           self.dragSampler?.invalidate()
           self.dragSampler = nil
@@ -568,8 +568,8 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     RunLoop.main.add(sampler, forMode: .common)
     dragSampler = sampler
-    // Dispatch mouseDown straight through the real IntensityPanel window hit-test and NSSlider
-    // mouseDown tracking loop; queued drags and mouseUp are dequeued from NSApp's event queue.
+    // Dispatch mouseDown, drags, and mouseUp through IntensityPanel.sendEvent so NSWindow
+    // hit-testing and NSSlider's gesture/cell tracking run identically on macOS 15 and 26.
     panel.sendEvent(down)
   }
 
