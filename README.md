@@ -102,7 +102,7 @@ open /tmp/mattepulp-build/Sue-Paper.app
 ## 贡献者
 
 - [SueBwj](https://github.com/SueBwj)
-- [Codex](https://github.com/codex)
+- Codex
 
 ## 许可
 

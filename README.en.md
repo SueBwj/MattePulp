@@ -102,7 +102,7 @@ Open questions on [GitHub Issues](https://github.com/SueBwj/MattePulp/issues). T
 ## Contributors
 
 - [SueBwj](https://github.com/SueBwj)
-- [Codex](https://github.com/codex)
+- Codex
 
 ## License
 
