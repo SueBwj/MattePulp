@@ -153,6 +153,54 @@ func textureTests(resources: URL, evidence: URL) throws {
 }
 
 @MainActor
+func scheduleTests(fixture: URL, scratch: URL) throws {
+  let zone = TimeZone(identifier: "America/New_York")!
+  let minutes = try String(contentsOf: fixture, encoding: .utf8)
+  for row in minutes.split(whereSeparator: \.isNewline) {
+    let columns = row.split(separator: ",")
+    let utcMinute = Int64(columns[0])!
+    let wall = Int(columns[1])!
+    var settings = ScheduleSettings()
+    settings.timed = true
+    settings.start = String(format: "%02d:%02d", wall / 60, wall % 60)
+    settings.end = "04:00"
+    let now = Date(timeIntervalSince1970: Double(utcMinute) * 60)
+    let active = settings.evaluate(now: now, zone: zone, manual: true, suppressed: false)
+    let before = settings.evaluate(
+      now: now.addingTimeInterval(-60), zone: zone, manual: true, suppressed: false)
+    require(active.visible == 1 && before.visible == 0, "shared DST fixture wall-time boundary")
+  }
+  let directory = scratch.appendingPathComponent("schedule")
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  let url = directory.appendingPathComponent("settings.json")
+  try Data(
+    #"{"enabled":false,"intensity":30,"schedule":{"timed":true,"start":42,"sunset":true,"latitude":"nope","longitude":"0"}}"#
+      .utf8
+  )
+  .write(to: url)
+  var settings = try Settings.load(from: url)
+  require(!settings.enabled && settings.intensity == 30, "legacy fields survive malformed rules")
+  require(
+    !settings.schedule.validTime && !settings.schedule.validLocation, "malformed rules unavailable")
+  settings.schedule.start = "21:00"
+  try settings.save(to: url)
+  let reopened = try Settings.load(from: url)
+  require(reopened == settings, "rules round trip next to legacy fields")
+  let blocked = directory.appendingPathComponent("blocked")
+  try Data().write(to: blocked)
+  let retryURL = blocked.appendingPathComponent("settings.json")
+  do {
+    try settings.save(to: retryURL)
+    require(false, "failed save is reported")
+  } catch {}
+  try FileManager.default.removeItem(at: blocked)
+  try settings.save(to: retryURL)
+  let retried = try Settings.load(from: retryURL)
+  require(retried == settings, "failed save can be retried")
+  print("PASS: shared rule bridge, native DST fixture, compatible settings and retry")
+}
+
+@MainActor
 final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
   let resources: URL
   let scratch: URL
@@ -266,9 +314,82 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         saved.language == "zh-Hans" && saved.intensity == 30 && saved.texture == "Parchment",
         "language reopens with texture and strength")
     } catch { require(false, "language reopen: \(error)") }
+    do { try exerciseSchedule(menu) } catch { require(false, "schedule settings: \(error)") }
     controller.snooze(for: 0.1)
     require(controller.overlays.allSatisfy { !$0.isVisible }, "snooze hides immediately")
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.exerciseExclusion() }
+  }
+
+  func exerciseSchedule(_ menu: NSMenu) throws {
+    let index = menu.items.firstIndex { $0.action == #selector(AppController.showSchedule) }!
+    menu.performActionForItem(at: index)
+    let window = controller.scheduleWindow!.window!
+    require(window.isVisible && window.title == "定时与日落", "menu opens native schedule settings")
+    menu.performActionForItem(at: index)
+    require(controller.scheduleWindow?.window === window, "reopening keeps the current draft")
+    func descendants(_ view: NSView) -> [NSView] {
+      [view] + view.subviews.flatMap(descendants)
+    }
+    let controls = descendants(window.contentView!)
+    let buttons = controls.compactMap { $0 as? NSButton }
+    let timed = buttons.first { $0.title == "启用定时" }!
+    let sunset = buttons.first { $0.title == "启用日落" }!
+    let save = buttons.first { $0.title == "保存" }!
+    let fields = controls.compactMap { $0 as? NSTextField }
+    let start = fields.first { $0.accessibilityLabel() == "开始时间（24 小时）" }!
+    let end = fields.first { $0.accessibilityLabel() == "结束时间（24 小时）" }!
+    require(timed.state == .off && sunset.state == .off, "native toggles default to off")
+    require(start.stringValue == "21:00" && end.stringValue == "06:00", "native clock defaults")
+    let components = Calendar.current.dateComponents([.hour, .minute], from: Date())
+    let wall = components.hour! * 60 + components.minute!
+    func time(_ delta: Int) -> String {
+      let minute = (wall + delta + 1440) % 1440
+      return String(format: "%02d:%02d", minute / 60, minute % 60)
+    }
+    timed.state = .on
+    sunset.state = .on
+    start.stringValue = time(60)
+    end.stringValue = time(120)
+    save.performClick(nil)
+    require(
+      controller.settings.schedule.timed && controller.settings.schedule.sunset, "both rules save")
+    require(
+      controller.overlays.allSatisfy { !$0.isVisible },
+      "daily rule remains active when sunset is unavailable")
+    require(
+      fields.contains { $0.stringValue.contains("请输入坐标") }
+        && fields.contains { $0.stringValue.contains("下次自动变化") },
+      "native status shows missing location and the next change")
+    let original = controller.settings
+    let backup = scratch.appendingPathComponent("settings-backup.json")
+    try FileManager.default.moveItem(at: controller.settingsURL, to: backup)
+    try FileManager.default.createDirectory(
+      at: controller.settingsURL, withIntermediateDirectories: false)
+    start.stringValue = time(-60)
+    end.stringValue = time(60)
+    save.performClick(nil)
+    require(controller.settings == original, "failed save keeps the applied schedule")
+    require(
+      fields.contains { $0.stringValue.contains("保存失败") }, "native save failure stays visible")
+    try FileManager.default.removeItem(at: controller.settingsURL)
+    try FileManager.default.moveItem(at: backup, to: controller.settingsURL)
+    save.performClick(nil)
+    require(controller.overlays.allSatisfy(\.isVisible), "retry applies the retained draft")
+    timed.state = .off
+    save.performClick(nil)
+    require(
+      !controller.settings.schedule.timed && controller.settings.schedule.sunset,
+      "toggle daily rule independently")
+    sunset.state = .off
+    save.performClick(nil)
+    require(!controller.settings.schedule.sunset, "toggle sunset independently")
+    let reopened = try Settings.load(from: controller.settingsURL)
+    require(
+      reopened == controller.settings, "schedule edits persist alongside the existing settings")
+    window.close()
+    fixture.makeKeyAndOrderFront(nil)
+    print(
+      "PASS: native schedule menu, window lifecycle, independent toggles, status and save retry")
   }
 
   func exerciseExclusion() {
@@ -412,13 +533,17 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 @main
 struct Tests {
   @MainActor static func main() throws {
-    require(CommandLine.arguments.count == 4, "tests RESOURCES SCRATCH EVIDENCE")
+    require(
+      CommandLine.arguments.count == 5 || CommandLine.arguments.last == "--fixtures-only",
+      "tests RESOURCES SCRATCH EVIDENCE ZONE_FIXTURE [--fixtures-only]")
     let resources = URL(fileURLWithPath: CommandLine.arguments[1])
     let scratch = URL(fileURLWithPath: CommandLine.arguments[2])
     let evidence = URL(fileURLWithPath: CommandLine.arguments[3])
-    let app = NSApplication.shared
     try settingsTests(scratch)
+    try scheduleTests(fixture: URL(fileURLWithPath: CommandLine.arguments[4]), scratch: scratch)
     try textureTests(resources: resources, evidence: evidence)
+    if CommandLine.arguments.last == "--fixtures-only" { return }
+    let app = NSApplication.shared
     app.setActivationPolicy(.regular)
     let delegate = TestDelegate(resources: resources, scratch: scratch)
     app.delegate = delegate

@@ -10,6 +10,8 @@ mod instance;
 mod locale;
 mod monitor;
 mod overlay;
+mod schedule_clock;
+mod schedule_window;
 mod settings;
 mod texture;
 mod tray;
@@ -24,8 +26,10 @@ use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVE
 use windows::Win32::UI::HiDpi::{
     SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
+use windows::Win32::UI::Shell::{NINF_KEY, NIN_SELECT};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
+use schedule_clock::{Clock, ScheduleSettings};
 use settings::Settings;
 use texture::{generate_tile, TextureKind, KINDS};
 
@@ -39,11 +43,13 @@ pub const ID_RESUME: u16 = 1303;
 pub const ID_EXCLUDE: u16 = 1401;
 pub const ID_LANG_ZH: u16 = 1501;
 pub const ID_LANG_EN: u16 = 1502;
+pub const ID_SCHEDULE: u16 = 1601;
 
 pub const INTENSITIES: [u32; 4] = [15, 20, 25, 30];
 
 const TIMER_POLL: usize = 1; // 前台应用轮询
 const TIMER_SNOOZE: usize = 2; // 打盹结束
+const NIN_KEYSELECT: u32 = NIN_SELECT | NINF_KEY;
 
 struct App {
     settings: Settings,
@@ -53,6 +59,7 @@ struct App {
     foreground_hook: Option<HWINEVENTHOOK>,
     snoozed: bool,
     hidden_by_exclusion: bool,
+    applied_visibility: Option<bool>,
 }
 
 thread_local! {
@@ -64,6 +71,7 @@ thread_local! {
         foreground_hook: None,
         snoozed: false,
         hidden_by_exclusion: false,
+        applied_visibility: None,
     });
 }
 
@@ -102,10 +110,6 @@ fn apply_shell_language(hwnd: HWND) {
     }
 }
 
-fn overlay_should_be_visible(enabled: bool, snoozed: bool, hidden_by_exclusion: bool) -> bool {
-    enabled && !snoozed && !hidden_by_exclusion
-}
-
 fn foreground_is_excluded(exclusions: &[String], foreground: Option<&str>) -> bool {
     match foreground {
         Some(name) => exclusions.iter().any(|entry| entry == name),
@@ -133,15 +137,21 @@ fn refresh_textures() {
     });
 }
 
-/// 根据 enabled / snoozed / exclusion 决定覆盖层可见性
 fn apply_visibility() {
+    let clock = Clock::now();
     APP.with(|app| {
-        let app = app.borrow();
-        let visible =
-            overlay_should_be_visible(app.settings.enabled, app.snoozed, app.hidden_by_exclusion);
-        unsafe {
+        let mut app = app.borrow_mut();
+        let manual = app.settings.enabled;
+        let snoozed = app.snoozed;
+        let excluded = app.hidden_by_exclusion;
+        let rules = &app.settings.schedule;
+        let result = rules.evaluate(&clock, manual, snoozed || excluded, false);
+        let visible = result.visible != 0;
+        unsafe { schedule_window::refresh(result, rules, &clock, manual, snoozed, excluded) };
+        if app.applied_visibility != Some(visible) {
+            app.applied_visibility = Some(visible);
             for o in &app.overlays {
-                overlay::set_visible(o, visible);
+                unsafe { overlay::set_visible(o, visible) };
             }
         }
     });
@@ -150,7 +160,7 @@ fn apply_visibility() {
 fn ensure_overlays_topmost() {
     APP.with(|app| {
         let app = app.borrow();
-        if !overlay_should_be_visible(app.settings.enabled, app.snoozed, app.hidden_by_exclusion) {
+        if app.applied_visibility != Some(true) {
             return;
         }
         for overlay in &app.overlays {
@@ -166,13 +176,9 @@ fn poll_exclusion() {
     let fg = exclusion::foreground_process_name();
     APP.with(|app| {
         let mut app = app.borrow_mut();
-        let excluded = foreground_is_excluded(&app.settings.exclusions, fg.as_deref());
-        if excluded != app.hidden_by_exclusion {
-            app.hidden_by_exclusion = excluded;
-            drop(app);
-            apply_visibility();
-        }
+        app.hidden_by_exclusion = foreground_is_excluded(&app.settings.exclusions, fg.as_deref());
     });
+    apply_visibility();
 }
 
 unsafe extern "system" fn foreground_changed(
@@ -213,12 +219,31 @@ fn rebuild_overlays() {
             APP.with(|app| {
                 let mut app = app.borrow_mut();
                 let mut old_overlays = std::mem::replace(&mut app.overlays, new_overlays);
+                app.applied_visibility = None;
                 unsafe { overlay::destroy_all(&mut old_overlays) };
             });
             apply_visibility();
         }
         Err(error) => eprintln!("rebuild overlays failed: {error}"),
     }
+}
+
+fn save_schedule(rules: ScheduleSettings) -> bool {
+    let saved = APP.with(|app| {
+        let mut app = app.borrow_mut();
+        let mut updated = app.settings.clone();
+        updated.schedule = rules;
+        if let Err(error) = updated.save() {
+            eprintln!("save schedule failed: {error}");
+            return false;
+        }
+        app.settings = updated;
+        true
+    });
+    if saved {
+        poll_exclusion();
+    }
+    saved
 }
 
 fn handle_command(hwnd: HWND, cmd: u32, fg_name: Option<String>) {
@@ -235,6 +260,19 @@ fn handle_command(hwnd: HWND, cmd: u32, fg_name: Option<String>) {
         ID_EXIT => unsafe {
             let _ = DestroyWindow(hwnd);
         },
+        ID_SCHEDULE => {
+            let (language, rules) = APP.with(|app| {
+                let app = app.borrow();
+                (
+                    locale::effective_language(app.settings.language),
+                    app.settings.schedule.clone(),
+                )
+            });
+            match unsafe { schedule_window::open(hwnd, language, &rules) } {
+                Ok(()) => poll_exclusion(),
+                Err(error) => eprintln!("open schedule settings failed: {error}"),
+            }
+        }
         ID_SNOOZE_5 | ID_SNOOZE_15 => {
             let mins = if cmd == ID_SNOOZE_5 { 5 } else { 15 };
             APP.with(|app| app.borrow_mut().snoozed = true);
@@ -349,7 +387,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
     match msg {
         tray::WM_TRAY => {
             let event = lparam.0 as u32 & 0xffff;
-            if event == WM_RBUTTONUP || event == WM_LBUTTONUP {
+            if matches!(event, WM_RBUTTONUP | WM_LBUTTONUP | NIN_KEYSELECT) {
                 // 必须在弹菜单之前捕获前台应用（弹菜单会切前台）
                 let fg = exclusion::foreground_process_name();
                 let (enabled, ti, ii, language, snoozed, foreground_excluded) = APP.with(|app| {
@@ -398,6 +436,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         WM_DISPLAYCHANGE => {
             rebuild_overlays();
             LRESULT(0)
+        }
+        WM_TIMECHANGE | WM_SETTINGCHANGE => {
+            poll_exclusion();
+            LRESULT(0)
+        }
+        WM_POWERBROADCAST if wparam.0 == PBT_APMRESUMEAUTOMATIC as usize => {
+            poll_exclusion();
+            LRESULT(1)
         }
         WM_DESTROY => {
             let _ = KillTimer(hwnd, TIMER_POLL);
@@ -463,7 +509,7 @@ fn run() -> windows::core::Result<()> {
         };
         APP.with(|app| app.borrow_mut().overlays = overlays);
         refresh_textures();
-        apply_visibility();
+        poll_exclusion();
 
         let hook = SetWinEventHook(
             EVENT_SYSTEM_FOREGROUND,
@@ -496,6 +542,11 @@ fn run() -> windows::core::Result<()> {
             if status == 0 {
                 break;
             }
+            if schedule_window::handle()
+                .is_some_and(|dialog| IsDialogMessageW(dialog, &msg).as_bool())
+            {
+                continue;
+            }
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
@@ -511,20 +562,11 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{foreground_is_excluded, overlay_should_be_visible, INTENSITIES};
+    use super::{foreground_is_excluded, INTENSITIES};
 
     #[test]
     fn intensity_steps_stay_fixed() {
         assert_eq!(INTENSITIES, [15, 20, 25, 30]);
-    }
-
-    #[test]
-    fn visibility_respects_every_suppression_state() {
-        assert!(overlay_should_be_visible(true, false, false));
-        assert!(!overlay_should_be_visible(false, false, false));
-        assert!(!overlay_should_be_visible(true, true, false));
-        assert!(!overlay_should_be_visible(true, false, true));
-        assert!(!overlay_should_be_visible(false, true, true));
     }
 
     #[test]
@@ -533,15 +575,5 @@ mod tests {
         assert!(foreground_is_excluded(&exclusions, Some("photos.exe")));
         assert!(!foreground_is_excluded(&exclusions, Some("notes.exe")));
         assert!(!foreground_is_excluded(&exclusions, None));
-        assert!(!overlay_should_be_visible(
-            true,
-            false,
-            foreground_is_excluded(&exclusions, Some("photos.exe")),
-        ));
-        assert!(overlay_should_be_visible(
-            true,
-            false,
-            foreground_is_excluded(&exclusions, Some("notes.exe")),
-        ));
     }
 }

@@ -12,6 +12,7 @@ use windows::Win32::Storage::FileSystem::{
 };
 
 use crate::locale::{self, Language};
+use crate::schedule_clock::ScheduleSettings;
 use crate::texture::TextureKind;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -28,6 +29,7 @@ pub struct Settings {
         serialize_with = "locale::serialize_language"
     )]
     pub language: Option<Language>,
+    pub schedule: ScheduleSettings,
 }
 
 impl<'de> Deserialize<'de> for Settings {
@@ -62,6 +64,9 @@ impl<'de> Deserialize<'de> for Settings {
             .get("language")
             .and_then(|v| locale::deserialize_language(v.clone()).ok())
             .flatten();
+        if let Some(value) = fields.get("schedule") {
+            settings.schedule = ScheduleSettings::from_document(value);
+        }
         Ok(settings)
     }
 }
@@ -74,6 +79,7 @@ impl Default for Settings {
             intensity: 20,
             exclusions: Vec::new(),
             language: None,
+            schedule: ScheduleSettings::default(),
         }
     }
 }
@@ -204,6 +210,7 @@ mod tests {
         assert_eq!(settings.texture, TextureKind::ClassicMatte);
         assert_eq!(settings.intensity, 20);
         assert_eq!(settings.language, None);
+        assert_eq!(settings.schedule, ScheduleSettings::default());
     }
 
     #[test]
@@ -314,6 +321,39 @@ mod tests {
         assert_eq!(settings.intensity, 20);
         assert_eq!(settings.exclusions, ["foo.exe"]);
         assert_eq!(settings.language, Some(Language::En));
+    }
+
+    #[test]
+    fn schedule_round_trips_after_failed_save_without_resetting_existing_fields() {
+        let dir =
+            std::env::temp_dir().join(format!("mattepulp-schedule-retry-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        let legacy = dir.join("unused-legacy.json");
+        std::fs::write(
+            &path,
+            r#"{"enabled":false,"intensity":30,"exclusions":["demo.exe"],"language":"en","schedule":{"timed":true,"start":42,"sunset":true,"latitude":"bad","longitude":"0"}}"#,
+        )
+        .unwrap();
+        let mut updated = Settings::load_from_paths(&path, &legacy);
+        assert!(!updated.enabled && updated.intensity == 30);
+        assert_eq!(updated.exclusions, ["demo.exe"]);
+        assert_eq!(updated.language, Some(Language::En));
+        assert!(!updated.schedule.valid_time() && !updated.schedule.valid_location());
+        updated.schedule.start = "21:00".into();
+        assert!(updated.schedule.valid_time());
+        let backup = dir.join("backup.json");
+        std::fs::rename(&path, &backup).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(save_to_path(&path, &updated).is_err());
+        assert!(!Settings::load_from_paths(&backup, &legacy)
+            .schedule
+            .valid_time());
+        std::fs::remove_dir(&path).unwrap();
+        std::fs::rename(&backup, &path).unwrap();
+        save_to_path(&path, &updated).unwrap();
+        assert_eq!(Settings::load_from_paths(&path, &legacy), updated);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
