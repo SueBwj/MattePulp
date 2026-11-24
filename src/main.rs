@@ -6,6 +6,7 @@
 #![windows_subsystem = "windows"]
 
 mod exclusion;
+mod instance;
 mod locale;
 mod monitor;
 mod overlay;
@@ -19,7 +20,6 @@ use std::sync::OnceLock;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 use windows::Win32::UI::HiDpi::{
     SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
@@ -50,7 +50,6 @@ struct App {
     overlays: Vec<overlay::Overlay>,
     texture_tile: Vec<u8>,
     tray_icon: Option<HICON>,
-    instance_mutex: Option<HANDLE>,
     foreground_hook: Option<HWINEVENTHOOK>,
     snoozed: bool,
     hidden_by_exclusion: bool,
@@ -62,7 +61,6 @@ thread_local! {
         overlays: Vec::new(),
         texture_tile: Vec::new(),
         tray_icon: None,
-        instance_mutex: None,
         foreground_hook: None,
         snoozed: false,
         hidden_by_exclusion: false,
@@ -411,9 +409,6 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 if let Some(icon) = app.tray_icon.take() {
                     let _ = DestroyIcon(icon);
                 }
-                if let Some(mutex) = app.instance_mutex.take() {
-                    let _ = CloseHandle(mutex);
-                }
                 if let Some(hook) = app.foreground_hook.take() {
                     let _ = UnhookWinEvent(hook);
                 }
@@ -426,18 +421,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
 }
 
 fn run() -> windows::core::Result<()> {
-    unsafe {
-        let instance_mutex = CreateMutexW(
-            None,
-            false,
-            windows::core::w!("Local\\SuePaper.SingleInstance"),
-        )?;
-        if GetLastError() == ERROR_ALREADY_EXISTS {
-            let _ = CloseHandle(instance_mutex);
-            return Ok(());
-        }
-        APP.with(|app| app.borrow_mut().instance_mutex = Some(instance_mutex));
+    // 单实例身份 = 现有设置目录：同目录已有实例时安静退出，其余锁错误
+    // 按启动失败处理。锁持有到 run() 结束，早期初始化失败同样释放。
+    let _instance_lock = match instance::acquire(&settings::settings_dir())? {
+        instance::Acquired::Held(lock) => lock,
+        instance::Acquired::AlreadyRunning => return Ok(()),
+    };
 
+    unsafe {
         // 多显示器不同 DPI 时保证拿到物理像素坐标
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 

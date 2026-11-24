@@ -78,9 +78,15 @@ impl Default for Settings {
     }
 }
 
-fn settings_path() -> PathBuf {
+/// 现有设置目录：%APPDATA%/Sue-Paper（APPDATA 缺失时相对当前目录）。
+/// 单实例锁也以该目录为身份，与 settings.json 的解析保持一致。
+pub(crate) fn settings_dir() -> PathBuf {
     let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(base).join("Sue-Paper").join("settings.json")
+    PathBuf::from(base).join("Sue-Paper")
+}
+
+fn settings_path() -> PathBuf {
+    settings_dir().join("settings.json")
 }
 
 fn legacy_settings_path() -> PathBuf {
