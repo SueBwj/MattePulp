@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["SueBwj"]
 description = "MattePulp (柔纸): paper-texture overlay"
 license = "MIT"
-repository = "https://github.com/SueBwj/sue-paper"
+repository = "https://github.com/SueBwj/MattePulp"
 readme = "README.md"
 
 [dependencies]
