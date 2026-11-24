@@ -4,7 +4,7 @@ import Darwin
 enum StartupError: Error { case alreadyRunning, lockUnavailable }
 
 @MainActor
-final class AppController: NSObject, NSMenuDelegate {
+final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
   let settingsURL: URL
   let textures: TextureStore
   private(set) var settings = Settings()
@@ -12,6 +12,17 @@ final class AppController: NSObject, NSMenuDelegate {
   private(set) var overlays: [Overlay] = []
   private(set) var statusItem: NSStatusItem?
   private(set) var lastError: MenuNotice?
+  /// All intensity levels of the active texture, preloaded for storage-free previewing.
+  private(set) var intensityImages: [Int: CGImage] = [:]
+  /// Intensity shown on screen but not yet persisted; nil means screen matches settings.
+  private(set) var previewIntensity: Int?
+  private(set) var intensityPanel: IntensityPanel?
+  /// Optional override used by non-intrusive synthetic fixtures to host the real panel offscreen.
+  var presentIntensityPanel: ((IntensityPanel, NSPoint) -> Void)?
+  /// Injectable only for synthetic tests so exclusion checks never inspect unrelated user apps.
+  var foregroundIdentityProvider: () -> String? = {
+    AppController.identity(NSWorkspace.shared.frontmostApplication)
+  }
   private var lock: Int32 = -1
   private var observers: [(NotificationCenter, NSObjectProtocol)] = []
   private var snoozeTimer: Timer?
@@ -40,6 +51,7 @@ final class AppController: NSObject, NSMenuDelegate {
     do { settings = try Settings.load(from: settingsURL) } catch {
       record(error, notice: .loadFailed)
     }
+    intensityImages = try textures.images(texture: settings.texture)
     try rebuildOverlays()
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     statusItem?.button?.title = "S"
@@ -83,7 +95,12 @@ final class AppController: NSObject, NSMenuDelegate {
   }
 
   func rebuildOverlays() throws {
-    let image = try textures.image(texture: settings.texture, intensity: settings.intensity)
+    let activeIntensity = previewIntensity ?? settings.intensity
+    guard let image = intensityImages[activeIntensity] else {
+      throw NSError(
+        domain: "SuePaper", code: 4,
+        userInfo: [NSLocalizedDescriptionKey: "No texture loaded for current intensity"])
+    }
     let replacements = NSScreen.screens.map { Overlay(screen: $0, image: image) }
     let previous = overlays
     overlays = replacements
@@ -97,7 +114,7 @@ final class AppController: NSObject, NSMenuDelegate {
   }
 
   func applyVisibility() {
-    applyVisibility(foreground: Self.identity(NSWorkspace.shared.frontmostApplication))
+    applyVisibility(foreground: foregroundIdentityProvider())
   }
 
   private func applyVisibility(foreground: String?) {
@@ -124,10 +141,18 @@ final class AppController: NSObject, NSMenuDelegate {
 
   private func change(_ updated: Settings) {
     do {
-      let image = try textures.image(texture: updated.texture, intensity: updated.intensity)
+      var images = intensityImages
+      if updated.texture != settings.texture {
+        images = try textures.images(texture: updated.texture)
+      }
       try updated.save(to: settingsURL)
       settings = updated
-      for overlay in overlays { (overlay.contentView as? TextureView)?.image = image }
+      intensityImages = images
+      previewIntensity = nil
+      if let image = images[settings.intensity] {
+        for overlay in overlays { (overlay.contentView as? TextureView)?.image = image }
+      }
+      (intensityPanel?.contentView as? IntensitySliderView)?.percent = settings.intensity
       lastError = nil
       refreshChrome(MenuText.resolved(saved: settings.language))
       applyVisibility()
@@ -147,11 +172,95 @@ final class AppController: NSObject, NSMenuDelegate {
     change(updated)
   }
 
-  @objc func selectIntensity(_ item: NSMenuItem) {
-    guard Settings.intensities.contains(item.tag) else { return }
+  /// Shows the keyboard-focusable intensity panel anchored at the menu bar item. The
+  /// panel is nonactivating: it takes keyboard focus without activating this app, so
+  /// the last external foreground application (and any exclusion of it) stays in effect
+  /// while the intensity is adjusted.
+  @objc func openIntensity(_ item: NSMenuItem) {
+    if let panel = intensityPanel {
+      panel.close()
+      return
+    }
+    guard let button = statusItem?.button, let buttonWindow = button.window else { return }
+    let buttonRect = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
+    let screen =
+      NSScreen.screens.first { $0.frame.intersects(buttonRect) } ?? NSScreen.screens.first
+    guard let screen else { return }
+    let title = MenuText.resolved(saved: settings.language).intensityMenu
+    let view = IntensitySliderView(
+      intensity: previewIntensity ?? settings.intensity, title: title)
+    view.onPreview = { [weak self] value in self?.previewIntensity(value) }
+    view.onCommit = { [weak self] in self?.commitIntensity() }
+    let panel = IntensityPanel(view: view, title: title)
+    intensityPanel = panel
+    panel.delegate = self
+    let size = panel.frame.size
+    let visible = screen.visibleFrame
+    var origin = NSPoint(x: buttonRect.minX, y: buttonRect.minY - size.height - 8)
+    origin.x = min(max(origin.x, visible.minX + 8), visible.maxX - size.width - 8)
+    if origin.y < visible.minY + 8 || origin.y + size.height > visible.maxY {
+      origin.y = max(visible.minY + 8, visible.maxY - size.height - 8)
+    }
+    if let presentIntensityPanel {
+      presentIntensityPanel(panel, origin)
+    } else {
+      panel.setFrameOrigin(origin)
+      panel.makeKeyAndOrderFront(nil)
+    }
+    panel.makeFirstResponder(view.slider)
+  }
+
+  /// Live preview from the slider: swap overlay images from the preloaded levels only.
+  /// Disabled, snoozed and excluded overlays stay hidden because visibility is reapplied.
+  func previewIntensity(_ value: Int) {
+    guard Settings.intensityRange.contains(value) else { return }
+    previewIntensity = value
+    if let image = intensityImages[value] {
+      for overlay in overlays { (overlay.contentView as? TextureView)?.image = image }
+    }
+    applyVisibility()
+  }
+
+  /// Persists the previewed intensity. On storage failure the overlays and slider UI
+  /// return to the persisted level so the screen never shows a value that was not saved.
+  func commitIntensity() {
+    let value = previewIntensity
+    previewIntensity = nil
+    guard let value else { return }
+    if value == settings.intensity {
+      restorePersistedIntensity()
+      return
+    }
     var updated = settings
-    updated.intensity = item.tag
-    change(updated)
+    updated.intensity = value
+    do {
+      try updated.save(to: settingsURL)
+      settings = updated
+      lastError = nil
+      if let image = intensityImages[settings.intensity] {
+        for overlay in overlays { (overlay.contentView as? TextureView)?.image = image }
+      }
+      applyVisibility()
+    } catch {
+      record(error, notice: .saveFailed)
+      restorePersistedIntensity()
+    }
+  }
+
+  /// Discards an uncommitted preview without touching storage and restores overlays
+  /// and slider UI to the last persisted intensity.
+  func cancelIntensityPreview() {
+    guard previewIntensity != nil else { return }
+    restorePersistedIntensity()
+  }
+
+  private func restorePersistedIntensity() {
+    previewIntensity = nil
+    if let image = intensityImages[settings.intensity] {
+      for overlay in overlays { (overlay.contentView as? TextureView)?.image = image }
+    }
+    (intensityPanel?.contentView as? IntensitySliderView)?.percent = settings.intensity
+    applyVisibility()
   }
 
   @objc func snooze(_ item: NSMenuItem) { snooze(for: TimeInterval(item.tag * 60)) }
@@ -232,13 +341,7 @@ final class AppController: NSObject, NSMenuDelegate {
         checked: texture.id == settings.texture, parent: textureMenu)
     }
     submenu(text.textureMenu, textureMenu)
-    let intensityMenu = NSMenu(title: text.intensityMenu)
-    for (label, intensity) in zip(text.intensities, Settings.intensities) {
-      item(
-        label, #selector(selectIntensity(_:)), tag: intensity,
-        checked: intensity == settings.intensity, parent: intensityMenu)
-    }
-    submenu(text.intensityMenu, intensityMenu)
+    item(text.intensityTitle(settings.intensity), #selector(openIntensity(_:)))
     let languageMenu = NSMenu(title: text.languageMenu)
     for choice in [AppLanguage.zhHans, AppLanguage.en] {
       item(
@@ -264,7 +367,15 @@ final class AppController: NSObject, NSMenuDelegate {
     item(text.quit, #selector(quit))
   }
 
+  func windowWillClose(_ notification: Notification) {
+    // Discard any uncommitted preview so cancelling never writes unsaved values.
+    cancelIntensityPreview()
+    if intensityPanel === notification.object as? NSPanel { intensityPanel = nil }
+  }
+
   func shutdown() {
+    intensityPanel?.close()
+    intensityPanel = nil
     snoozeTimer?.invalidate()
     snoozeTimer = nil
     for (center, token) in observers { center.removeObserver(token) }

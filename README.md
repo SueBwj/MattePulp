@@ -29,7 +29,7 @@ Windows v0.1.0（`53b266a`）仍是旧托盘图标和单一界面，没有语言
 
 纸纹盖住每块屏幕，鼠标和键盘直接穿过，不拿焦点，也不出现在窗口切换里。Mac 的显示范围见 [Mac 说明](macos/README.md#display-behavior)。
 
-四种纹理由分形噪声生成，可无缝平铺；强度与纹理编号与已发布包一致（见下表）。
+四种纹理由分形噪声生成，可无缝平铺，纹理编号与已发布包一致（见下表）；强度在 macOS 上为 15%-30% 滑杆（1% 步进），在 Windows 上为 15% / 20% / 25% / 30% 四档。
 
 | 设置编号 | 英文菜单 | 中文菜单 | 观感 |
 |---|---|---|---|
@@ -44,7 +44,7 @@ Windows v0.1.0（`53b266a`）仍是旧托盘图标和单一界面，没有语言
 
 **Windows。** 解压稳定包后运行 `sue-paper.exe`。从源码运行时右键托盘图标：启用纹理、纹理/强度/打盹、排除当前应用、语言（中文或 English）、退出。托盘提示在中文下是「柔纸」，英文下是 MattePulp。设置文件在 `%APPDATA%\Sue-Paper\settings.json`。
 
-**Mac。** 已发布镜像仍是混排菜单。从源码构建 `Sue-Paper.app` 后点菜单栏 **S**：整份菜单只用一种语言，并可单独选语言。Finder 显示名是 MattePulp，可执行文件仍是 `Sue-Paper`；设置在 `~/Library/Application Support/Sue-Paper/settings.json`。不需要辅助功能或屏幕录制权限。
+**Mac。** 已发布镜像仍是混排菜单与四档固定强度。从源码构建 `Sue-Paper.app` 后点菜单栏 **S**：整份菜单只用一种语言，可单独选语言，并可通过「强度 - N%」弹出可聚焦的原生滑杆面板（15%-30%，1% 步进；拖动实时预览、松开保存，键盘方向键与辅助功能调节每次即保存）。Finder 显示名是 MattePulp，可执行文件仍是 `Sue-Paper`；设置在 `~/Library/Application Support/Sue-Paper/settings.json`。不需要辅助功能或屏幕录制权限。
 
 未保存语言时，菜单跟随系统界面语言；选定后写入 `language`（`zh-Hans` 或 `en`），Windows 与 Mac 规则相同。
 

@@ -70,7 +70,7 @@ struct MenuText {
 
   static func make(_ language: AppLanguage) -> MenuText {
     let textures = Settings.textures.map { textureTitle(id: $0, language: language) }
-    let intensities = Settings.intensities.map { "\($0)%" }
+    let intensities = Settings.intensityRange.map { "\($0)%" }
     switch language {
     case .zhHans:
       return MenuText(
@@ -132,6 +132,10 @@ struct MenuText {
     case (.en, true): "Include \(name)"
     case (.en, false): "Exclude \(name)"
     }
+  }
+
+  func intensityTitle(_ percent: Int) -> String {
+    "\(intensityMenu) - \(percent)%"
   }
 
   func notice(_ notice: MenuNotice) -> String {

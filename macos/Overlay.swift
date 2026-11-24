@@ -22,7 +22,7 @@ struct TextureStore {
   }
 
   func image(texture: String, intensity: Int) throws -> CGImage {
-    guard Settings.textures.contains(texture), Settings.intensities.contains(intensity) else {
+    guard Settings.textures.contains(texture), Settings.intensityRange.contains(intensity) else {
       throw NSError(domain: "SuePaper", code: 2)
     }
     let data = try Data(
@@ -41,6 +41,16 @@ struct TextureStore {
         userInfo: [NSLocalizedDescriptionKey: "Invalid texture pixels"])
     }
     return image
+  }
+
+  /// Every intensity level of one texture, preloaded so that previewing a slider drag
+  /// or keyboard step never touches the settings storage or the disk.
+  func images(texture: String) throws -> [Int: CGImage] {
+    var images: [Int: CGImage] = [:]
+    for intensity in Settings.intensityRange {
+      images[intensity] = try image(texture: texture, intensity: intensity)
+    }
+    return images
   }
 }
 
