@@ -20,8 +20,8 @@ Download a published package first. The bilingual menus in this source tree are 
 
 | System | Release | File |
 |---|---|---|
-| Windows x64 | [v0.1.0](https://github.com/SueBwj/sue-paper/releases/tag/v0.1.0) stable | [sue-paper-v0.1.0-windows-x64.zip](https://github.com/SueBwj/sue-paper/releases/download/v0.1.0/sue-paper-v0.1.0-windows-x64.zip) |
-| Mac Apple Silicon | [v0.1.1-macos.1](https://github.com/SueBwj/sue-paper/releases/tag/v0.1.1-macos.1) prerelease | [Sue-Paper-macOS-arm64-local-d9fb2c7.dmg](https://github.com/SueBwj/sue-paper/releases/download/v0.1.1-macos.1/Sue-Paper-macOS-arm64-local-d9fb2c7.dmg) |
+| Windows x64 | [v0.1.0](https://github.com/SueBwj/MattePulp/releases/tag/v0.1.0) stable | [sue-paper-v0.1.0-windows-x64.zip](https://github.com/SueBwj/MattePulp/releases/download/v0.1.0/sue-paper-v0.1.0-windows-x64.zip) |
+| Mac Apple Silicon | [v0.1.1-macos.1](https://github.com/SueBwj/MattePulp/releases/tag/v0.1.1-macos.1) prerelease | [Sue-Paper-macOS-arm64-local-d9fb2c7.dmg](https://github.com/SueBwj/MattePulp/releases/download/v0.1.1-macos.1/Sue-Paper-macOS-arm64-local-d9fb2c7.dmg) |
 
 Windows v0.1.0 (`53b266a`) still has the older tray art and a single-language UI with no language menu. The Mac prerelease (`d9fb2c7`, Apple Silicon only) already uses the current translucent paper icon, but menus stay mixed Chinese/English with no separate language item. The disk image is ad-hoc signed and not notarized; Gatekeeper may block a network download. Older `settings.json` files without a `language` field still load.
 
@@ -93,12 +93,16 @@ Use a fresh output directory each time. Outputs are `Sue-Paper.app` and `sue-pap
 
 ## Feedback
 
-Open questions on [GitHub Issues](https://github.com/SueBwj/sue-paper/issues). The source repository is [SueBwj/sue-paper](https://github.com/SueBwj/sue-paper).
+Open questions on [GitHub Issues](https://github.com/SueBwj/MattePulp/issues). The source repository is [SueBwj/MattePulp](https://github.com/SueBwj/MattePulp).
 
 ## Credits
 
 - The idea of a digital matte surface comes from [Paperman](https://paperman.cc).
-- The program was written by SueBwj together with coding assistants.
+
+## Contributors
+
+- [SueBwj](https://github.com/SueBwj)
+- Codex
 
 ## License
 

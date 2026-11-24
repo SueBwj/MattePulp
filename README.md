@@ -20,8 +20,8 @@
 
 | 系统 | 版本 | 文件 |
 |---|---|---|
-| Windows x64 | [v0.1.0](https://github.com/SueBwj/sue-paper/releases/tag/v0.1.0) 稳定版 | [sue-paper-v0.1.0-windows-x64.zip](https://github.com/SueBwj/sue-paper/releases/download/v0.1.0/sue-paper-v0.1.0-windows-x64.zip) |
-| Mac Apple Silicon | [v0.1.1-macos.1](https://github.com/SueBwj/sue-paper/releases/tag/v0.1.1-macos.1) 预发布 | [Sue-Paper-macOS-arm64-local-d9fb2c7.dmg](https://github.com/SueBwj/sue-paper/releases/download/v0.1.1-macos.1/Sue-Paper-macOS-arm64-local-d9fb2c7.dmg) |
+| Windows x64 | [v0.1.0](https://github.com/SueBwj/MattePulp/releases/tag/v0.1.0) 稳定版 | [sue-paper-v0.1.0-windows-x64.zip](https://github.com/SueBwj/MattePulp/releases/download/v0.1.0/sue-paper-v0.1.0-windows-x64.zip) |
+| Mac Apple Silicon | [v0.1.1-macos.1](https://github.com/SueBwj/MattePulp/releases/tag/v0.1.1-macos.1) 预发布 | [Sue-Paper-macOS-arm64-local-d9fb2c7.dmg](https://github.com/SueBwj/MattePulp/releases/download/v0.1.1-macos.1/Sue-Paper-macOS-arm64-local-d9fb2c7.dmg) |
 
 Windows v0.1.0（`53b266a`）仍是旧托盘图标和单一界面，没有语言菜单。Mac 预发布（`d9fb2c7`，仅 Apple Silicon）已用当前半透明纸图标，但菜单仍是中英混排、无单独语言项；镜像只做 ad-hoc 签名、未公证，从网络下载时 Gatekeeper 可能拦截。旧版 `settings.json` 没有 `language` 字段也能继续用。
 
@@ -93,12 +93,16 @@ open /tmp/mattepulp-build/Sue-Paper.app
 
 ## 反馈
 
-问题请开到 [GitHub Issues](https://github.com/SueBwj/sue-paper/issues)。源码仓库是 [SueBwj/sue-paper](https://github.com/SueBwj/sue-paper)。
+问题请开到 [GitHub Issues](https://github.com/SueBwj/MattePulp/issues)。源码仓库是 [SueBwj/MattePulp](https://github.com/SueBwj/MattePulp)。
 
 ## 致谢
 
 - 数字哑光表面这个想法来自 [Paperman](https://paperman.cc)。
-- 程序由 SueBwj 与编程助手一起写成。
+
+## 贡献者
+
+- [SueBwj](https://github.com/SueBwj)
+- Codex
 
 ## 许可
 
