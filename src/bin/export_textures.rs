@@ -19,7 +19,7 @@ fn main() -> io::Result<()> {
     for (kind, name) in KINDS.iter().zip(KIND_NAMES) {
         let id = serde_json::to_value(kind).map_err(io::Error::other)?;
         let id = id.as_str().expect("texture kinds serialize as strings");
-        for intensity in [15, 20, 25, 30] {
+        for intensity in 15..=30 {
             std::fs::write(
                 directory.join(format!("{id}-{intensity}.bgra")),
                 generate_tile(*kind, intensity),

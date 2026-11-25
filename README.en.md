@@ -29,7 +29,7 @@ Windows v0.1.0 (`53b266a`) still has the older tray art and a single-language UI
 
 The texture covers every screen. The pointer and keyboard pass through it; it does not take focus or appear in window switching. Mac display limits are in the [Mac notes](macos/README.md#display-behavior).
 
-Four textures come from fractal noise and tile without a seam. Intensity steps and texture ids match the published packages (table below).
+Four textures come from fractal noise and tile without a seam. Texture ids match the published packages (table below); intensity uses a 15%-30% slider in 1% steps on macOS and 4 levels (15% / 20% / 25% / 30%) on Windows.
 
 | Settings id | English menu | Chinese menu | Character |
 |---|---|---|---|
@@ -44,7 +44,7 @@ In a Windows build from this source, the Snooze menu adds "Resume now" while sno
 
 **Windows.** Unzip the stable package and run `sue-paper.exe`. When you build this source tree, right-click the tray icon: enable texture, texture/intensity/snooze, exclude the current app, language (中文 or English), and quit. The tray tip is 柔纸 in Chinese and MattePulp in English. Settings live in `%APPDATA%\Sue-Paper\settings.json`.
 
-**Mac.** The published image still has the mixed menu. Build `Sue-Paper.app` from this source and click **S** in the menu bar for a one-language menu with a separate language item. Finder shows MattePulp; the executable remains `Sue-Paper`. Settings live in `~/Library/Application Support/Sue-Paper/settings.json`. The app asks for neither Accessibility nor Screen Recording permission.
+**Mac.** The published image still has the mixed menu and four fixed intensity items. Build `Sue-Paper.app` from this source and click **S** in the menu bar for a one-language menu with a separate language item and a focusable intensity slider panel (15%-30%, 1% steps: drag previews live and saves on release; arrow keys and accessibility adjustments save on every step). Finder shows MattePulp; the executable remains `Sue-Paper`. Settings live in `~/Library/Application Support/Sue-Paper/settings.json`. The app asks for neither Accessibility nor Screen Recording permission.
 
 ### Schedule & Sunset
 

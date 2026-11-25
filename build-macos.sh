@@ -29,6 +29,7 @@ xcrun swiftc -swift-version 6 -warnings-as-errors -O -target arm64-apple-macosx1
     -import-objc-header "$root/macos/ScheduleBridge.h" "$CARGO_TARGET_DIR/release/libsue_paper.a" \
     "$root/macos/Schedule.swift" "$root/macos/ScheduleWindow.swift" \
     "$root/macos/Settings.swift" "$root/macos/Locale.swift" "$root/macos/Overlay.swift" \
+    "$root/macos/IntensitySlider.swift" \
     "$root/macos/AppController.swift" "$root/macos/main.swift" \
     -o "$app/Contents/MacOS/Sue-Paper"
 cp "$root/macos/Info.plist" "$app/Contents/Info.plist"

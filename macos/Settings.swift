@@ -2,7 +2,8 @@ import Foundation
 
 struct Settings: Codable, Equatable {
   static let textures = ["ClassicMatte", "WhisperWeave", "Parchment", "VellumMist"]
-  static let intensities = [15, 20, 25, 30]
+  static let intensityRange = 15...30
+  static let defaultIntensity = 20
   var enabled = true
   var texture = "ClassicMatte"
   var intensity = 20
@@ -18,7 +19,7 @@ struct Settings: Codable, Equatable {
     let values = try decoder.container(keyedBy: CodingKeys.self)
     enabled = try values.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
     texture = try values.decodeIfPresent(String.self, forKey: .texture) ?? "ClassicMatte"
-    intensity = try values.decodeIfPresent(Int.self, forKey: .intensity) ?? 20
+    intensity = try values.decodeIfPresent(Int.self, forKey: .intensity) ?? Self.defaultIntensity
     exclusions = try values.decodeIfPresent([String].self, forKey: .exclusions) ?? []
     language = try values.decodeIfPresent(String.self, forKey: .language)
     schedule = (try? values.decode(ScheduleSettings.self, forKey: .schedule)) ?? ScheduleSettings()
@@ -27,7 +28,7 @@ struct Settings: Codable, Equatable {
 
   mutating func normalize() {
     if !Self.textures.contains(texture) { texture = "ClassicMatte" }
-    if !Self.intensities.contains(intensity) { intensity = 20 }
+    if !Self.intensityRange.contains(intensity) { intensity = Self.defaultIntensity }
     if let language, AppLanguage(rawValue: language) == nil { self.language = nil }
     exclusions = Array(
       Set(
