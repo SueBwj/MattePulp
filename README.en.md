@@ -31,6 +31,8 @@ The texture covers every screen. The pointer and keyboard pass through it; it do
 
 Four textures come from fractal noise and tile without a seam. Texture ids match the published packages (table below); intensity uses a 15%-30% slider in 1% steps on macOS and 4 levels (15% / 20% / 25% / 30%) on Windows.
 
+In builds from this source, the Windows tray and Mac menu bar offer Original, Light Warm and Warm Paper under Tone. Original is the default. Every tone works with every texture and intensity, and the app remembers the chosen tone on restart.
+
 | Settings id | English menu | Chinese menu | Character |
 |---|---|---|---|
 | ClassicMatte | Classic Matte | 经典哑光 | Clean, soft grain for reading |

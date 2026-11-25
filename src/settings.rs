@@ -6,6 +6,7 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Deserializer, Serialize};
+use sue_paper::tone::Tone;
 use windows::core::PCWSTR;
 use windows::Win32::Storage::FileSystem::{
     MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
@@ -21,6 +22,7 @@ pub struct Settings {
     pub texture: TextureKind,
     /// 目标不透明度，百分比（15..30）
     pub intensity: u32,
+    pub tone: Tone,
     /// 排除列表：进程可执行文件名（小写），如 "photoshop.exe"
     pub exclusions: Vec<String>,
     /// 用户选定的界面语言。缺省时跟随系统 UI 语言。
@@ -55,6 +57,12 @@ impl<'de> Deserialize<'de> for Settings {
             settings.intensity = value;
         }
         if let Some(value) = fields
+            .get("tone")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+        {
+            settings.tone = value;
+        }
+        if let Some(value) = fields
             .get("exclusions")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
         {
@@ -77,6 +85,7 @@ impl Default for Settings {
             enabled: true,
             texture: TextureKind::ClassicMatte,
             intensity: 20,
+            tone: Tone::Original,
             exclusions: Vec::new(),
             language: None,
             schedule: ScheduleSettings::default(),
@@ -131,6 +140,21 @@ impl Settings {
 
     pub fn save(&self) -> io::Result<()> {
         save_to_path(&settings_path(), self)
+    }
+
+    pub fn change_tone(&mut self, tone: Tone) -> io::Result<bool> {
+        self.change_tone_at(tone, &settings_path())
+    }
+
+    fn change_tone_at(&mut self, tone: Tone, path: &Path) -> io::Result<bool> {
+        if self.tone == tone {
+            return Ok(false);
+        }
+        let mut updated = self.clone();
+        updated.tone = tone;
+        save_to_path(path, &updated)?;
+        *self = updated;
+        Ok(true)
     }
 
     fn normalized(mut self) -> Self {
@@ -398,6 +422,50 @@ mod tests {
         assert!(!serde_json::to_string(&Settings::default())
             .unwrap()
             .contains("language"));
+    }
+
+    #[test]
+    fn invalid_tone_falls_back_without_losing_other_fields() {
+        let old = r#"{"enabled":false,"texture":"Parchment","intensity":25,"exclusions":["demo.exe"],"language":"en","schedule":{"timed":true,"start":"21:00","end":"22:00"}}"#;
+        let expected: Settings = serde_json::from_str(old).unwrap();
+        assert_eq!(expected.tone, Tone::Original);
+        assert_eq!(expected.texture, TextureKind::Parchment);
+        assert_eq!(expected.intensity, 25);
+        assert_eq!(expected.language, Some(Language::En));
+        assert_eq!(expected.exclusions, ["demo.exe"]);
+        assert!(!expected.enabled && expected.schedule.timed && expected.schedule.valid_time());
+        for invalid in ["null", "[]", "42", "{}", r#""Sepia""#] {
+            let text = format!(r#"{},"tone":{invalid}}}"#, &old[..old.len() - 1]);
+            assert_eq!(serde_json::from_str::<Settings>(&text).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn tone_commit_preserves_state_on_failure_and_reopens_after_retry() {
+        let dir = std::env::temp_dir().join(format!("mattepulp-tone-{}", std::process::id()));
+        let path = dir.join("settings.json");
+        let backup = dir.join("backup.json");
+        let legacy = dir.join("unused-legacy.json");
+        let mut settings = Settings {
+            texture: TextureKind::VellumMist,
+            intensity: 15,
+            ..Settings::default()
+        };
+        assert!(settings.change_tone_at(Tone::LightWarm, &path).unwrap());
+        assert_eq!(Settings::load_from_paths(&path, &legacy), settings);
+        std::fs::rename(&path, &backup).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(settings.change_tone_at(Tone::WarmPaper, &path).is_err());
+        assert_eq!(settings.tone, Tone::LightWarm);
+        assert_eq!(Settings::load_from_paths(&backup, &legacy), settings);
+        std::fs::remove_dir(&path).unwrap();
+        std::fs::rename(&backup, &path).unwrap();
+        assert!(settings.change_tone_at(Tone::WarmPaper, &path).unwrap());
+        assert!(!settings.change_tone_at(Tone::WarmPaper, &path).unwrap());
+        assert_eq!(Settings::load_from_paths(&path, &legacy), settings);
+        assert!(settings.change_tone_at(Tone::Original, &path).unwrap());
+        assert_eq!(Settings::load_from_paths(&path, &legacy), settings);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

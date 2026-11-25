@@ -19,6 +19,7 @@ mod tray;
 use std::cell::RefCell;
 use std::sync::OnceLock;
 
+use sue_paper::tone::Tone;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -44,6 +45,7 @@ pub const ID_EXCLUDE: u16 = 1401;
 pub const ID_LANG_ZH: u16 = 1501;
 pub const ID_LANG_EN: u16 = 1502;
 pub const ID_SCHEDULE: u16 = 1601;
+pub const ID_TONE_BASE: u16 = 1700; // 1700..1702
 
 pub const INTENSITIES: [u32; 4] = [15, 20, 25, 30];
 
@@ -122,6 +124,8 @@ fn refresh_textures() {
     APP.with(|app| {
         let mut app = app.borrow_mut();
         app.texture_tile = generate_tile(app.settings.texture, app.settings.intensity);
+        let tone = app.settings.tone;
+        tone.apply(&mut app.texture_tile);
         let App {
             overlays,
             texture_tile,
@@ -366,6 +370,14 @@ fn handle_command(hwnd: HWND, cmd: u32, fg_name: Option<String>) {
                 apply_visibility();
             }
         }
+        c if (ID_TONE_BASE..ID_TONE_BASE + Tone::ALL.len() as u16).contains(&c) => {
+            let tone = Tone::ALL[(c - ID_TONE_BASE) as usize];
+            match APP.with(|app| app.borrow_mut().settings.change_tone(tone)) {
+                Ok(true) => refresh_textures(),
+                Ok(false) => {}
+                Err(error) => eprintln!("save tone failed: {error}"),
+            }
+        }
         _ => {}
     }
 }
@@ -390,29 +402,23 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             if matches!(event, WM_RBUTTONUP | WM_LBUTTONUP | NIN_KEYSELECT) {
                 // 必须在弹菜单之前捕获前台应用（弹菜单会切前台）
                 let fg = exclusion::foreground_process_name();
-                let (enabled, ti, ii, language, snoozed, foreground_excluded) = APP.with(|app| {
+                let request = APP.with(|app| {
                     let app = app.borrow();
-                    (
-                        app.settings.enabled,
-                        tex_idx(app.settings.texture),
-                        int_idx(app.settings.intensity),
-                        locale::effective_language(app.settings.language),
-                        app.snoozed,
-                        foreground_is_excluded(&app.settings.exclusions, fg.as_deref()),
-                    )
-                });
-                let cmd = tray::show_menu(
-                    hwnd,
-                    &locale::MenuRequest {
-                        language,
-                        enabled,
-                        texture_index: ti,
-                        intensity_index: ii,
+                    locale::MenuRequest {
+                        language: locale::effective_language(app.settings.language),
+                        enabled: app.settings.enabled,
+                        texture_index: tex_idx(app.settings.texture),
+                        intensity_index: int_idx(app.settings.intensity),
+                        tone: app.settings.tone,
                         foreground: fg.as_deref(),
-                        snoozed,
-                        foreground_excluded,
-                    },
-                );
+                        snoozed: app.snoozed,
+                        foreground_excluded: foreground_is_excluded(
+                            &app.settings.exclusions,
+                            fg.as_deref(),
+                        ),
+                    }
+                });
+                let cmd = tray::show_menu(hwnd, &request);
                 if cmd != 0 {
                     handle_command(hwnd, cmd, fg);
                 }

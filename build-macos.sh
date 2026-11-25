@@ -26,7 +26,7 @@ cargo run --locked --release --manifest-path "$root/Cargo.toml" --bin export_tex
 cargo build --locked --release --manifest-path "$root/Cargo.toml" --lib
 xcrun swiftc -swift-version 6 -warnings-as-errors -O -target arm64-apple-macosx12.0 \
     -module-cache-path "$CLANG_MODULE_CACHE_PATH" -framework AppKit \
-    -import-objc-header "$root/macos/ScheduleBridge.h" "$CARGO_TARGET_DIR/release/libsue_paper.a" \
+    -import-objc-header "$root/macos/RustBridge.h" "$CARGO_TARGET_DIR/release/libsue_paper.a" \
     "$root/macos/Schedule.swift" "$root/macos/ScheduleWindow.swift" \
     "$root/macos/Settings.swift" "$root/macos/Locale.swift" "$root/macos/Overlay.swift" \
     "$root/macos/IntensitySlider.swift" \

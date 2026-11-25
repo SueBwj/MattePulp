@@ -12,7 +12,7 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
   private(set) var overlays: [Overlay] = []
   private(set) var statusItem: NSStatusItem?
   private(set) var lastError: MenuNotice?
-  /// All intensity levels of the active texture, preloaded for storage-free previewing.
+  /// All intensity levels of the active texture and tone, preloaded for previewing.
   private(set) var intensityImages: [Int: CGImage] = [:]
   /// Intensity shown on screen but not yet persisted; nil means screen matches settings.
   private(set) var previewIntensity: Int?
@@ -37,7 +37,7 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
     super.init()
   }
 
-  func start() throws {
+  func start(presentUI: Bool = true) throws {
     try FileManager.default.createDirectory(
       at: settingsURL.deletingLastPathComponent(),
       withIntermediateDirectories: true)
@@ -54,7 +54,8 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
     do { settings = try Settings.load(from: settingsURL) } catch {
       record(error, notice: .loadFailed)
     }
-    intensityImages = try textures.images(texture: settings.texture)
+    intensityImages = try textures.images(texture: settings.texture, tone: settings.tone)
+    guard presentUI else { return }
     try rebuildOverlays()
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     statusItem?.button?.title = "S"
@@ -184,8 +185,8 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
   private func change(_ updated: Settings) -> Bool {
     do {
       var images = intensityImages
-      if updated.texture != settings.texture {
-        images = try textures.images(texture: updated.texture)
+      if updated.texture != settings.texture || updated.tone != settings.tone {
+        images = try textures.images(texture: updated.texture, tone: updated.tone)
       }
       try updated.save(to: settingsURL)
       settings = updated
@@ -215,6 +216,15 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
     guard Settings.textures.indices.contains(item.tag) else { return }
     var updated = settings
     updated.texture = Settings.textures[item.tag]
+    change(updated)
+  }
+
+  @objc func selectTone(_ item: NSMenuItem) {
+    guard let id = item.representedObject as? String, let tone = PaperTone(rawValue: id),
+      tone != settings.tone
+    else { return }
+    var updated = settings
+    updated.tone = tone
     change(updated)
   }
 
@@ -376,10 +386,13 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
   @objc func quit() { NSApp.terminate(nil) }
 
   func menuNeedsUpdate(_ menu: NSMenu) {
+    populateMenu(menu, foreground: NSWorkspace.shared.frontmostApplication)
+  }
+
+  func populateMenu(_ menu: NSMenu, foreground: NSRunningApplication?) {
     menu.removeAllItems()
     let text = MenuText.resolved(saved: settings.language)
     refreshChrome(text)
-    let foreground = NSWorkspace.shared.frontmostApplication
     menuForeground =
       foreground?.processIdentifier == ProcessInfo.processInfo.processIdentifier
       ? nil : Self.identity(foreground)
@@ -411,6 +424,13 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
     }
     submenu(text.textureMenu, textureMenu)
     item(text.intensityTitle(settings.intensity), #selector(openIntensity(_:)))
+    let toneMenu = NSMenu(title: text.toneMenu)
+    for tone in PaperTone.allCases {
+      item(
+        text.toneTitle(tone), #selector(selectTone(_:)), checked: tone == settings.tone,
+        represented: tone.rawValue, parent: toneMenu)
+    }
+    submenu(text.toneMenu, toneMenu)
     let languageMenu = NSMenu(title: text.languageMenu)
     for choice in [AppLanguage.zhHans, AppLanguage.en] {
       item(

@@ -138,6 +138,19 @@ struct MenuText {
     "\(intensityMenu) - \(percent)%"
   }
 
+  var toneMenu: String { language == .zhHans ? "色调" : "Tone" }
+
+  func toneTitle(_ tone: PaperTone) -> String {
+    switch (language, tone) {
+    case (.zhHans, .original): "原色"
+    case (.zhHans, .lightWarm): "浅暖"
+    case (.zhHans, .warmPaper): "暖纸"
+    case (.en, .original): "Original"
+    case (.en, .lightWarm): "Light Warm"
+    case (.en, .warmPaper): "Warm Paper"
+    }
+  }
+
   func notice(_ notice: MenuNotice) -> String {
     switch notice {
     case .loadFailed: loadFailed
@@ -156,7 +169,7 @@ struct MenuText {
   var commandLabels: [String] {
     [
       product, toggle, textureMenu, intensityMenu, snoozeMenu, snooze5, snooze15, resume,
-      languageMenu, quit, loadFailed, displaysFailed, saveFailed, unnamedApp,
-    ] + textures + intensities
+      toneMenu, languageMenu, quit, loadFailed, displaysFailed, saveFailed, unnamedApp,
+    ] + textures + intensities + PaperTone.allCases.map(toneTitle)
   }
 }

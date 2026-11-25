@@ -231,6 +231,9 @@ pub unsafe fn show_menu(owner: HWND, request: &MenuRequest<'_>) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::locale::Language;
+    use crate::ID_TONE_BASE;
+    use sue_paper::tone::Tone;
 
     #[test]
     fn embedded_logo_creates_a_native_icon() {
@@ -238,6 +241,57 @@ mod tests {
         assert!(!icon.0.is_null());
         unsafe {
             let _ = DestroyIcon(icon);
+        }
+    }
+
+    #[test]
+    fn native_tone_submenu_has_three_localized_choices_and_one_checkmark() {
+        for (language, title, labels) in [
+            (Language::ZhHans, "色调", ["原色", "浅暖", "暖纸"]),
+            (
+                Language::En,
+                "Tone",
+                ["Original", "Light Warm", "Warm Paper"],
+            ),
+        ] {
+            for tone in Tone::ALL {
+                let nodes = menu_model(&MenuRequest {
+                    language,
+                    enabled: true,
+                    texture_index: 0,
+                    intensity_index: 1,
+                    tone,
+                    foreground: None,
+                    snoozed: false,
+                    foreground_excluded: false,
+                });
+                let position = nodes
+                    .iter()
+                    .position(
+                        |node| matches!(node, MenuNode::Submenu { label, .. } if label == title),
+                    )
+                    .unwrap() as i32;
+                unsafe {
+                    let menu = CreatePopupMenu().unwrap();
+                    fill_menu(menu, &nodes);
+                    let mut text = [0; 64];
+                    let length =
+                        GetMenuStringW(menu, position as u32, Some(&mut text), MF_BYPOSITION);
+                    assert_eq!(String::from_utf16_lossy(&text[..length as usize]), title);
+                    let submenu = GetSubMenu(menu, position);
+                    assert!(!submenu.0.is_null());
+                    assert_eq!(GetMenuItemCount(submenu), 3);
+                    for (index, label) in labels.into_iter().enumerate() {
+                        let id = u32::from(ID_TONE_BASE) + index as u32;
+                        assert_eq!(GetMenuItemID(submenu, index as i32), id);
+                        let length = GetMenuStringW(submenu, id, Some(&mut text), MF_BYCOMMAND);
+                        assert_eq!(String::from_utf16_lossy(&text[..length as usize]), label);
+                        let state = GetMenuState(submenu, id, MF_BYCOMMAND);
+                        assert_eq!(state & MF_CHECKED.0 != 0, index as u8 == tone as u8);
+                    }
+                    DestroyMenu(menu).unwrap();
+                }
+            }
         }
     }
 }

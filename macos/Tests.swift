@@ -24,6 +24,21 @@ func settingsTests(_ scratch: URL) throws {
   let partial = try JSONDecoder().decode(Settings.self, from: Data("{\"enabled\":false}".utf8))
   require(!partial.enabled && partial.intensity == 20, "partial settings keep defaults")
   require(partial.language == nil, "old settings omit language")
+  let toneBase = """
+    "enabled":false,"texture":"Parchment","intensity":17,"language":"en",
+    "exclusions":["com.example.fixture"],"schedule":{"timed":true,"start":"21:00","end":"22:00"}
+    """
+  let oldTone = try JSONDecoder().decode(Settings.self, from: Data("{\(toneBase)}".utf8))
+  require(
+    oldTone.tone == .original && !oldTone.enabled && oldTone.texture == "Parchment"
+      && oldTone.intensity == 17 && oldTone.language == "en"
+      && oldTone.exclusions == ["com.example.fixture"] && oldTone.schedule.validTime,
+    "old settings retain their texture, intensity, language, exclusions and schedule")
+  for invalid in ["null", "[]", "42", "{}", #""Sepia""#] {
+    let data = Data("{\(toneBase),\"tone\":\(invalid)}".utf8)
+    let decoded = try JSONDecoder().decode(Settings.self, from: data)
+    require(decoded == oldTone, "invalid tone preserves every other field")
+  }
   let unknown = try JSONDecoder().decode(
     Settings.self,
     from: Data("{\"enabled\":false,\"intensity\":15,\"language\":\"zh-Hant\"}".utf8))
@@ -139,27 +154,29 @@ func renderSyntheticSliderSnapshots(to evidence: URL) throws {
 }
 
 @MainActor
+func renderTexture(_ image: CGImage, scale: CGFloat) -> CGContext {
+  let context = CGContext(
+    data: nil, width: 1024, height: 1024, bitsPerComponent: 8,
+    bytesPerRow: 4096, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+  context.scaleBy(x: scale, y: scale)
+  TextureView.draw(
+    image, in: context,
+    bounds: CGRect(x: 0, y: 0, width: 1024 / scale, height: 1024 / scale), scale: scale)
+  return context
+}
+
+@MainActor
 func textureTests(resources: URL, evidence: URL) throws {
   let store = try TextureStore(directory: resources.appendingPathComponent("Textures"))
   try FileManager.default.createDirectory(at: evidence, withIntermediateDirectories: true)
-  func render(_ image: CGImage, scale: CGFloat) -> CGContext {
-    let context = CGContext(
-      data: nil, width: 1024, height: 1024, bitsPerComponent: 8,
-      bytesPerRow: 4096, space: CGColorSpace(name: CGColorSpace.sRGB)!,
-      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-    context.scaleBy(x: scale, y: scale)
-    TextureView.draw(
-      image, in: context,
-      bounds: CGRect(x: 0, y: 0, width: 1024 / scale, height: 1024 / scale), scale: scale)
-    return context
-  }
   var fingerprints = Set<Data>()
   for texture in store.catalog {
     var previousAlpha = 0
     for intensity in Settings.intensityRange {
-      let image = try store.image(texture: texture.id, intensity: intensity)
-      let normal = render(image, scale: 1)
-      let retina = render(image, scale: 2)
+      let image = try store.image(texture: texture.id, intensity: intensity, tone: .original)
+      let normal = renderTexture(image, scale: 1)
+      let retina = renderTexture(image, scale: 2)
       let bytes = Data(bytes: normal.data!, count: 4096 * 1024)
       require(
         bytes == Data(bytes: retina.data!, count: 4096 * 1024), "Retina physical pixels match 1x")
@@ -198,6 +215,135 @@ func textureTests(resources: URL, evidence: URL) throws {
   try renderSyntheticSliderSnapshots(to: evidence)
   print(
     "PASS: 4 textures x 16 intensities, monotonic strength, seamless repeats and 1x/2x equality")
+}
+
+@MainActor
+func toneTextureTests(resources: URL, evidence: URL) throws {
+  let store = try TextureStore(directory: resources.appendingPathComponent("Textures"))
+  for texture in store.catalog {
+    for intensity in [15, 17, 20, 30] {
+      var original: Data?
+      for tone in PaperTone.allCases {
+        let image = try store.image(texture: texture.id, intensity: intensity, tone: tone)
+        let normal = renderTexture(image, scale: 1)
+        let retina = renderTexture(image, scale: 2)
+        let bytes = Data(bytes: normal.data!, count: 4096 * 1024)
+        require(bytes == Data(bytes: retina.data!, count: bytes.count), "tone 1x/2x pixel equality")
+        require(bytes[0..<2048] == bytes[2048..<4096], "tone horizontal tile repeat")
+        require(bytes[0..<4096] == bytes[(512 * 4096)..<(513 * 4096)], "tone vertical tile repeat")
+        if let original {
+          require(bytes != original, "warm tone differs from original")
+          require(
+            stride(from: 3, to: 4096, by: 4).allSatisfy { bytes[$0] == original[$0] },
+            "AppKit draw preserves original alpha")
+        } else {
+          original = bytes
+        }
+        if intensity == 20 || texture.id == "ClassicMatte" {
+          try writeToneComposite(normal.makeImage()!, texture.id, intensity, tone, evidence)
+        }
+      }
+    }
+  }
+  print("PASS: three tones preserve physical pixels, tile repeat and alpha through AppKit")
+}
+
+@MainActor
+func writeToneComposite(
+  _ tiled: CGImage, _ texture: String, _ strength: Int, _ tone: PaperTone, _ evidence: URL
+) throws {
+  let width = 512
+  let height = 160
+  let space = CGColorSpace(name: CGColorSpace.sRGB)!
+  let rect = CGRect(x: 0, y: 0, width: width, height: height)
+  let overlay = tiled.cropping(to: rect)!
+  for (surface, gray, ink) in [("light", 0.96, 0.19), ("dark", 0.11, 0.78)] {
+    let context = CGContext(
+      data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+      space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    context.setFillColor(CGColor(srgbRed: gray, green: gray, blue: gray, alpha: 1))
+    context.fill(rect)
+    context.setFillColor(CGColor(srgbRed: ink, green: ink, blue: ink, alpha: 1))
+    context.fill(CGRect(x: 32, y: 118, width: 126, height: 11))
+    for (index, length) in [264, 232, 252, 160].enumerated() {
+      context.fill(CGRect(x: 32, y: 93 - 18 * index, width: length, height: 3))
+    }
+    context.draw(overlay, in: rect)
+    let bitmap = NSBitmapImageRep(cgImage: context.makeImage()!)
+    let name = "tone-\(texture)-\(strength)-\(tone.rawValue)-\(surface).png"
+    try bitmap.representation(using: .png, properties: [:])!.write(
+      to: evidence.appendingPathComponent(name))
+  }
+}
+
+@MainActor
+func toneMenuTests(resources: URL, scratch: URL) throws {
+  let directory = scratch.appendingPathComponent("tone-menu")
+  let controller = try AppController(settingsDirectory: directory, resources: resources)
+  controller.foregroundIdentityProvider = { nil }
+  var settings = Settings()
+  settings.enabled = false
+  settings.texture = "WhisperWeave"
+  settings.intensity = 17
+  settings.language = "zh-Hans"
+  try settings.save(to: controller.settingsURL)
+  try controller.start(presentUI: false)
+  defer { controller.shutdown() }
+
+  let menu = NSMenu()
+  func choices(_ controller: AppController, _ title: String) -> NSMenu {
+    controller.populateMenu(menu, foreground: nil)
+    return menu.item(withTitle: title)!.submenu!
+  }
+  let original = controller.intensityImages[17]!
+  let initial = choices(controller, "色调")
+  require(initial.items.map(\.title) == ["原色", "浅暖", "暖纸"], "Chinese native tone choices")
+  require(initial.items.map(\.state) == [.on, .off, .off], "original starts checked")
+  initial.performActionForItem(at: 1)
+  settings.tone = .lightWarm
+  let light = controller.intensityImages[17]!
+  require(controller.settings == settings && light !== original, "native action applies light warm")
+  require(choices(controller, "色调").items.map(\.state) == [.off, .on, .off], "light warm checked")
+
+  let fm = FileManager.default
+  let backup = directory.appendingPathComponent("backup.json")
+  try fm.moveItem(at: controller.settingsURL, to: backup)
+  try fm.createDirectory(at: controller.settingsURL, withIntermediateDirectories: false)
+  choices(controller, "色调").performActionForItem(at: 2)
+  require(
+    controller.lastError == .saveFailed && controller.settings == settings
+      && controller.intensityImages[17] === light,
+    "failed tone save preserves the applied tone and slider images")
+  require(
+    choices(controller, "色调").items.map(\.state) == [.off, .on, .off], "failed save keeps check")
+  let diskBeforeRetry = try Settings.load(from: backup)
+  require(diskBeforeRetry == settings, "failed tone save preserves disk settings")
+  try fm.removeItem(at: controller.settingsURL)
+  try fm.moveItem(at: backup, to: controller.settingsURL)
+  choices(controller, "色调").performActionForItem(at: 2)
+  settings.tone = .warmPaper
+  require(controller.lastError == nil && controller.settings == settings, "tone save retries")
+  let warm = controller.intensityImages[17]!.dataProvider!.data! as Data
+  controller.shutdown()
+
+  let restarted = try AppController(settingsDirectory: directory, resources: resources)
+  restarted.foregroundIdentityProvider = { nil }
+  try restarted.start(presentUI: false)
+  defer { restarted.shutdown() }
+  require(restarted.settings == settings, "startup restores the selected tone and other settings")
+  require(restarted.intensityImages[17]!.dataProvider!.data! as Data == warm, "warm pixels reopen")
+  require(
+    choices(restarted, "色调").items.map(\.state) == [.off, .off, .on], "restarted tone is checked")
+  menu.item(withTitle: "语言")!.submenu!.performActionForItem(at: 1)
+  let english = choices(restarted, "Tone")
+  require(english.items.map(\.title) == ["Original", "Light Warm", "Warm Paper"], "English tones")
+  require(english.items.map(\.state) == [.off, .off, .on], "restarted tone is checked")
+  english.performActionForItem(at: 0)
+  require(
+    restarted.intensityImages[17]!.dataProvider!.data! as Data == original.dataProvider!.data!
+      as Data,
+    "selecting original restores the same pixels")
+  print("PASS: offscreen native tone menus, save failure rollback, retry and restart")
 }
 
 @MainActor
@@ -768,7 +914,8 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     } catch { require(false, "menu persistence/lock: \(error)") }
     let menu = controller.statusItem!.menu!
     controller.menuNeedsUpdate(menu)
-    menu.item(at: 3)!.submenu!.performActionForItem(at: 1)
+    let language = MenuText.resolved(saved: controller.settings.language).languageMenu
+    menu.item(withTitle: language)!.submenu!.performActionForItem(at: 1)
     controller.menuNeedsUpdate(menu)
     require(controller.settings.language == "en", "English choice persisted")
     require(menu.item(at: 0)?.title == "Enable paper texture", "English menu refreshed")
@@ -781,7 +928,7 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     require(
       controller.statusItem?.button?.accessibilityLabel() == "MattePulp",
       "English accessibility name")
-    menu.item(at: 3)!.submenu!.performActionForItem(at: 0)
+    menu.item(withTitle: "Language")!.submenu!.performActionForItem(at: 0)
     controller.menuNeedsUpdate(menu)
     require(menu.item(at: 0)?.title == "启用纸张纹理", "Chinese menu refreshed")
     require(menu.item(at: 1)?.submenu?.item(at: 2)?.title == "羊皮纸", "Chinese texture name")
@@ -1109,6 +1256,8 @@ struct Tests {
     try settingsTests(scratch)
     try scheduleTests(fixture: URL(fileURLWithPath: CommandLine.arguments[4]), scratch: scratch)
     try textureTests(resources: resources, evidence: evidence)
+    try toneTextureTests(resources: resources, evidence: evidence)
+    try toneMenuTests(resources: resources, scratch: scratch)
     if CommandLine.arguments.last == "--fixtures-only" { return }
     app.setActivationPolicy(skipForeground ? .prohibited : .regular)
     let delegate = TestDelegate(

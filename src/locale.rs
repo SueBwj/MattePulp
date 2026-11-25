@@ -2,6 +2,7 @@
 //! 未保存选择时跟随 Windows UI 语言；不是简体中文则用英文。
 
 use serde::{Deserialize, Deserializer, Serializer};
+use sue_paper::tone::Tone;
 use windows::Win32::Globalization::{
     GetUserDefaultLocaleName, GetUserDefaultUILanguage, LCIDToLocaleName,
 };
@@ -9,7 +10,7 @@ use windows::Win32::Globalization::{
 use crate::texture::KIND_NAMES;
 use crate::{
     ID_EXCLUDE, ID_EXIT, ID_INT_BASE, ID_LANG_EN, ID_LANG_ZH, ID_RESUME, ID_SCHEDULE, ID_SNOOZE_15,
-    ID_SNOOZE_5, ID_TEX_BASE, ID_TOGGLE, INTENSITIES,
+    ID_SNOOZE_5, ID_TEX_BASE, ID_TOGGLE, ID_TONE_BASE, INTENSITIES,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,6 +108,8 @@ pub struct MenuCopy {
     pub toggle_off: &'static str,
     pub texture_menu: &'static str,
     pub intensity_menu: &'static str,
+    pub tone_menu: &'static str,
+    pub tones: [&'static str; 3],
     pub snooze_menu: &'static str,
     pub snooze_5: &'static str,
     pub snooze_15: &'static str,
@@ -125,6 +128,8 @@ pub fn menu_copy(language: Language) -> MenuCopy {
             toggle_off: "　启用纸张纹理",
             texture_menu: "纹理",
             intensity_menu: "强度",
+            tone_menu: "色调",
+            tones: ["原色", "浅暖", "暖纸"],
             snooze_menu: "打盹",
             snooze_5: "暂停 5 分钟",
             snooze_15: "暂停 15 分钟",
@@ -140,6 +145,8 @@ pub fn menu_copy(language: Language) -> MenuCopy {
             toggle_off: "　Enable paper texture",
             texture_menu: "Texture",
             intensity_menu: "Intensity",
+            tone_menu: "Tone",
+            tones: ["Original", "Light Warm", "Warm Paper"],
             snooze_menu: "Snooze",
             snooze_5: "Snooze 5 minutes",
             snooze_15: "Snooze 15 minutes",
@@ -205,6 +212,7 @@ pub struct MenuRequest<'a> {
     pub enabled: bool,
     pub texture_index: usize,
     pub intensity_index: usize,
+    pub tone: Tone,
     pub foreground: Option<&'a str>,
     pub snoozed: bool,
     pub foreground_excluded: bool,
@@ -216,6 +224,7 @@ pub fn menu_model(request: &MenuRequest<'_>) -> Vec<MenuNode> {
         enabled,
         texture_index,
         intensity_index,
+        tone,
         foreground,
         snoozed,
         foreground_excluded,
@@ -241,6 +250,16 @@ pub fn menu_model(request: &MenuRequest<'_>) -> Vec<MenuNode> {
             id: ID_INT_BASE + index as u16,
             label: format!("{value}%"),
             checked: index == intensity_index,
+            enabled: true,
+        })
+        .collect();
+    let tones = Tone::ALL
+        .into_iter()
+        .zip(copy.tones)
+        .map(|(choice, label)| MenuNode::Command {
+            id: ID_TONE_BASE + choice as u16,
+            label: label.to_string(),
+            checked: choice == tone,
             enabled: true,
         })
         .collect();
@@ -304,6 +323,10 @@ pub fn menu_model(request: &MenuRequest<'_>) -> Vec<MenuNode> {
         MenuNode::Submenu {
             label: copy.intensity_menu.to_string(),
             items: intensities,
+        },
+        MenuNode::Submenu {
+            label: copy.tone_menu.to_string(),
+            items: tones,
         },
         MenuNode::Submenu {
             label: copy.snooze_menu.to_string(),
@@ -522,6 +545,7 @@ mod tests {
             enabled,
             texture_index,
             intensity_index,
+            tone: Tone::Original,
             foreground,
             snoozed,
             foreground_excluded,

@@ -139,16 +139,9 @@ pub unsafe fn apply_texture(overlay: &Overlay, tile: &[u8]) -> windows::core::Re
     }
 
     // 平铺填充
-    let (wu, hu, tu) = (w as usize, h as usize, TILE);
+    let (wu, hu) = (w as usize, h as usize);
     let dst = std::slice::from_raw_parts_mut(bits as *mut u8, wu * hu * 4);
-    for yy in 0..hu {
-        let ty = yy % tu;
-        let src_row = &tile[ty * tu * 4..(ty + 1) * tu * 4];
-        let dst_row = &mut dst[yy * wu * 4..(yy + 1) * wu * 4];
-        for chunk in dst_row.chunks_mut(src_row.len()) {
-            chunk.copy_from_slice(&src_row[..chunk.len()]);
-        }
-    }
+    tile_surface(dst, wu, tile);
 
     let old = SelectObject(hdc_mem, hbmp);
     if old.0.is_null() || old.0 as isize == -1 {
@@ -189,6 +182,16 @@ pub unsafe fn apply_texture(overlay: &Overlay, tile: &[u8]) -> windows::core::Re
     updated
 }
 
+fn tile_surface(dst: &mut [u8], width: usize, tile: &[u8]) {
+    for (y, dst_row) in dst.chunks_exact_mut(width * 4).enumerate() {
+        let start = (y % TILE) * TILE * 4;
+        let src_row = &tile[start..start + TILE * 4];
+        for chunk in dst_row.chunks_mut(src_row.len()) {
+            chunk.copy_from_slice(&src_row[..chunk.len()]);
+        }
+    }
+}
+
 pub unsafe fn set_visible(overlay: &Overlay, visible: bool) {
     let cmd = if visible { SW_SHOWNA } else { SW_HIDE };
     let _ = ShowWindow(overlay.hwnd, cmd);
@@ -223,5 +226,27 @@ mod tests {
             rect: RECT::default(),
         };
         assert!(unsafe { apply_texture(&overlay, &[]) }.is_err());
+    }
+
+    #[test]
+    fn windows_surface_repeats_warm_tiles_at_native_pixel_size() {
+        use crate::texture::{generate_tile, TextureKind};
+        use sue_paper::tone::Tone;
+
+        let (width, height) = (TILE + 17, TILE + 9);
+        let base = generate_tile(TextureKind::ClassicMatte, 20);
+        let mut surface = vec![0; width * height * 4];
+        for tone in Tone::ALL {
+            let mut tile = base.clone();
+            tone.apply(&mut tile);
+            tile_surface(&mut surface, width, &tile);
+            for y in 0..height {
+                for x in 0..width {
+                    let dst = (y * width + x) * 4;
+                    let src = ((y % TILE) * TILE + x % TILE) * 4;
+                    assert_eq!(surface[dst..dst + 4], tile[src..src + 4]);
+                }
+            }
+        }
     }
 }

@@ -19,7 +19,7 @@ xcrun swiftc -swift-version 6 -warnings-as-errors -target arm64-apple-macosx12.0
     -parse-as-library "$root/macos/ForegroundFixture.swift" -o "$scratch/foreground-fixture"
 xcrun swiftc -swift-version 6 -warnings-as-errors -target arm64-apple-macosx12.0 \
     -module-cache-path "$output/module-cache" -framework AppKit \
-    -import-objc-header "$root/macos/ScheduleBridge.h" "$CARGO_TARGET_DIR/release/libsue_paper.a" \
+    -import-objc-header "$root/macos/RustBridge.h" "$CARGO_TARGET_DIR/release/libsue_paper.a" \
     "$root/macos/Schedule.swift" "$root/macos/ScheduleWindow.swift" \
     "$root/macos/Settings.swift" "$root/macos/Locale.swift" "$root/macos/Overlay.swift" \
     "$root/macos/IntensitySlider.swift" \
