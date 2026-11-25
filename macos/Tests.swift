@@ -17,6 +17,90 @@ func require(_ condition: @autoclosure () -> Bool, _ message: String) {
 }
 
 @MainActor
+func loginItemTests(resources: URL, scratch: URL) throws {
+  let app = "com.suebwj.sue-paper"
+  let other = "com.example.other"
+  var registrations: [String: LoginItemState] = [other: .on]
+  var readUnavailable = false
+  var writeError = false
+  var nextEnabledState: LoginItemState = .on
+  var writes = 0
+  let service = LoginItem(
+    status: { readUnavailable ? .unavailable : (registrations[app] ?? .off) },
+    write: { enabled in
+      writes += 1
+      if writeError { throw LoginItemError.registrationFailed }
+      registrations[app] = enabled ? nextEnabledState : nil
+    })
+  func controller() throws -> AppController {
+    try AppController(settingsDirectory: scratch, resources: resources, loginItem: service)
+  }
+  let first = try controller()
+  let english = MenuText.make(.en)
+  let chinese = MenuText.make(.zhHans)
+  func menu(_ controller: AppController, _ text: MenuText = MenuText.make(.en)) -> NSMenu {
+    let menu = NSMenu()
+    controller.appendLoginItemMenu(to: menu, text: text)
+    return menu
+  }
+  let open = menu(first)
+  require(
+    open.items.count == 1 && open.items[0].title == "Launch at login"
+      && open.items[0].state == .off && open.items[0].isEnabled && writes == 0,
+    "opening the native menu keeps launch at login off")
+  open.performActionForItem(at: 0)
+  open.performActionForItem(at: 0)
+  require(writes == 1, "repeated opt-in is idempotent")
+  let reopened = try controller()
+  let on = menu(reopened, chinese)
+  require(
+    on.items[0].title == "登录时启动" && on.items[0].state == .on,
+    "recreated controller shows the live registration in Chinese")
+
+  writeError = true
+  on.performActionForItem(at: 0)
+  let failedRemoval = menu(reopened)
+  require(
+    failedRemoval.items[0].state == .on
+      && failedRemoval.items[1].title == english.loginChangeFailed,
+    "failed opt-out reports the failure and keeps the actual state")
+  writeError = false
+  on.performActionForItem(at: 0)
+  on.performActionForItem(at: 0)
+  require(writes == 3 && menu(reopened).items[0].state == .off, "repeated opt-out is idempotent")
+
+  writeError = true
+  open.performActionForItem(at: 0)
+  let failedEnable = menu(first)
+  require(
+    failedEnable.items[0].state == .off && failedEnable.items[1].title == english.loginChangeFailed,
+    "failed opt-in never checks launch at login")
+  writeError = false
+  nextEnabledState = .requiresApproval
+  open.performActionForItem(at: 0)
+  let pending = menu(first)
+  require(
+    pending.items.count == 3 && pending.items[0].state == .off && !pending.items[0].isEnabled
+      && pending.items[1].title == english.loginApproval,
+    "system approval is a separate, unchecked state")
+  pending.performActionForItem(at: 2)
+  require(
+    registrations[app] == nil && registrations[other] == .on,
+    "removing the pending item leaves the other registration alone")
+
+  readUnavailable = true
+  let unavailable = menu(first, chinese)
+  require(
+    unavailable.items[0].state == .off && !unavailable.items[0].isEnabled
+      && unavailable.items[1].title == chinese.loginUnavailable,
+    "lookup failure disables the checkbox and reports unknown state")
+  readUnavailable = false
+  registrations[app] = .on
+  require(menu(first).items[0].state == .on, "menu reads external state changes")
+  print("PASS: AppKit login item menu with isolated registration states")
+}
+
+@MainActor
 func settingsTests(_ scratch: URL) throws {
   let url = scratch.appendingPathComponent("settings-tests/settings.json")
   let missing = try Settings.load(from: url)
@@ -1253,6 +1337,7 @@ struct Tests {
     let skipForeground =
       ProcessInfo.processInfo.environment["SUE_PAPER_SKIP_FOREGROUND_TESTS"] == "1"
     let app = NSApplication.shared
+    try loginItemTests(resources: resources, scratch: scratch)
     try settingsTests(scratch)
     try scheduleTests(fixture: URL(fileURLWithPath: CommandLine.arguments[4]), scratch: scratch)
     try textureTests(resources: resources, evidence: evidence)

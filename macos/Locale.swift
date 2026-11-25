@@ -57,6 +57,11 @@ struct MenuText {
   let snooze15: String
   let resume: String
   let languageMenu: String
+  let launchAtLogin: String
+  let loginApproval: String
+  let removeLoginItem: String
+  let loginUnavailable: String
+  let loginChangeFailed: String
   let quit: String
   let loadFailed: String
   let displaysFailed: String
@@ -86,6 +91,11 @@ struct MenuText {
         snooze15: "暂停 15 分钟",
         resume: "立即恢复",
         languageMenu: "语言",
+        launchAtLogin: "登录时启动",
+        loginApproval: "登录项需要系统批准",
+        removeLoginItem: "移除登录项",
+        loginUnavailable: "登录项状态不可用",
+        loginChangeFailed: "未能更改登录启动",
         quit: "退出柔纸",
         loadFailed: "未能读取设置，已改用默认值",
         displaysFailed: "未能更新显示器",
@@ -104,6 +114,11 @@ struct MenuText {
         snooze15: "Snooze 15 minutes",
         resume: "Resume now",
         languageMenu: "Language",
+        launchAtLogin: "Launch at login",
+        loginApproval: "Login item needs system approval",
+        removeLoginItem: "Remove login item",
+        loginUnavailable: "Login item status unavailable",
+        loginChangeFailed: "Could not change launch at login",
         quit: "Quit MattePulp",
         loadFailed: "Could not load settings; using defaults",
         displaysFailed: "Could not update displays",

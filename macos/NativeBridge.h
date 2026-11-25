@@ -1,5 +1,10 @@
+#include <CoreFoundation/CoreFoundation.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
+
+int32_t matte_login_item_status(CFURLRef bundle);
+bool matte_login_item_set_enabled(CFURLRef bundle, bool enabled);
 
 #define MATTE_RULE_UNAVAILABLE 1
 #define MATTE_RULE_INACTIVE 2

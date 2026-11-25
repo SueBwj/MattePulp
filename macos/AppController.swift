@@ -7,6 +7,8 @@ enum StartupError: Error { case alreadyRunning, lockUnavailable }
 final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
   let settingsURL: URL
   let textures: TextureStore
+  private let loginItem: LoginItem
+  private var loginItemChangeFailed = false
   private(set) var settings = Settings()
   private(set) var visibility = Visibility()
   private(set) var overlays: [Overlay] = []
@@ -31,9 +33,10 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
   private(set) var scheduleWindow: ScheduleWindow?
   private var menuForeground: String?
 
-  init(settingsDirectory: URL, resources: URL) throws {
+  init(settingsDirectory: URL, resources: URL, loginItem: LoginItem = .unavailable) throws {
     settingsURL = settingsDirectory.appendingPathComponent("settings.json")
     textures = try TextureStore(directory: resources.appendingPathComponent("Textures"))
+    self.loginItem = loginItem
     super.init()
   }
 
@@ -385,6 +388,46 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
 
   @objc func quit() { NSApp.terminate(nil) }
 
+  @objc func changeLoginItem(_ item: NSMenuItem) {
+    let enabled = item.tag == 1
+    do {
+      try loginItem.setEnabled(enabled)
+      let state = loginItem.status()
+      loginItemChangeFailed =
+        enabled ? (state != .on && state != .requiresApproval) : state != .off
+    } catch {
+      loginItemChangeFailed = loginItem.status() != .requiresApproval || !enabled
+      let error = error as NSError
+      NSLog("Could not change launch at login (%@, %ld)", error.domain, error.code)
+    }
+  }
+
+  func appendLoginItemMenu(to menu: NSMenu, text: MenuText) {
+    let state = loginItem.status()
+    let action = state == .on || state == .off ? #selector(changeLoginItem(_:)) : nil
+    let item = menu.addItem(withTitle: text.launchAtLogin, action: action, keyEquivalent: "")
+    item.target = self
+    item.tag = state == .off ? 1 : 0
+    item.state = state == .on ? .on : .off
+    item.isEnabled = action != nil
+    item.setAccessibilityLabel(item.title)
+
+    if state == .requiresApproval {
+      menu.addItem(withTitle: text.loginApproval, action: nil, keyEquivalent: "").isEnabled = false
+      let remove = menu.addItem(
+        withTitle: text.removeLoginItem, action: #selector(changeLoginItem(_:)), keyEquivalent: "")
+      remove.target = self
+      remove.setAccessibilityLabel(remove.title)
+    } else if state == .unavailable {
+      menu.addItem(withTitle: text.loginUnavailable, action: nil, keyEquivalent: "").isEnabled =
+        false
+    }
+    if loginItemChangeFailed {
+      menu.addItem(withTitle: text.loginChangeFailed, action: nil, keyEquivalent: "").isEnabled =
+        false
+    }
+  }
+
   func menuNeedsUpdate(_ menu: NSMenu) {
     populateMenu(menu, foreground: NSWorkspace.shared.frontmostApplication)
   }
@@ -453,6 +496,8 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
         #selector(toggleExclusion), checked: excluded)
     }
     if let lastError { item(text.notice(lastError), nil) }
+    menu.addItem(.separator())
+    appendLoginItemMenu(to: menu, text: text)
     menu.addItem(.separator())
     item(text.quit, #selector(quit))
   }

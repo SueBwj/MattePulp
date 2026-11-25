@@ -231,8 +231,9 @@ pub unsafe fn show_menu(owner: HWND, request: &MenuRequest<'_>) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::locale::Language;
-    use crate::ID_TONE_BASE;
+    use crate::locale::{login_menu, Language};
+    use crate::login_item::State;
+    use crate::{ID_LOGIN_DISABLE, ID_LOGIN_ENABLE, ID_LOGIN_ERROR, ID_LOGIN_STATUS, ID_TONE_BASE};
     use sue_paper::tone::Tone;
 
     #[test]
@@ -264,6 +265,8 @@ mod tests {
                     foreground: None,
                     snoozed: false,
                     foreground_excluded: false,
+                    login_item: State::Off,
+                    login_change_failed: false,
                 });
                 let position = nodes
                     .iter()
@@ -283,6 +286,14 @@ mod tests {
                     assert_eq!(GetMenuItemCount(submenu), 3);
                     for (index, label) in labels.into_iter().enumerate() {
                         let id = u32::from(ID_TONE_BASE) + index as u32;
+                        assert!(![
+                            ID_LOGIN_ENABLE,
+                            ID_LOGIN_DISABLE,
+                            ID_LOGIN_STATUS,
+                            ID_LOGIN_ERROR
+                        ]
+                        .map(u32::from)
+                        .contains(&id));
                         assert_eq!(GetMenuItemID(submenu, index as i32), id);
                         let length = GetMenuStringW(submenu, id, Some(&mut text), MF_BYCOMMAND);
                         assert_eq!(String::from_utf16_lossy(&text[..length as usize]), label);
@@ -291,6 +302,61 @@ mod tests {
                     }
                     DestroyMenu(menu).unwrap();
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn login_item_uses_native_checkmarks_and_disabled_rows() {
+        for (state, failed, id, expected, extra) in [
+            (State::Off, false, ID_LOGIN_ENABLE, MF_UNCHECKED, None),
+            (State::On, false, ID_LOGIN_DISABLE, MF_CHECKED, None),
+            (
+                State::Off,
+                true,
+                ID_LOGIN_ENABLE,
+                MF_UNCHECKED,
+                Some(ID_LOGIN_ERROR),
+            ),
+            (
+                State::Blocked,
+                false,
+                ID_LOGIN_ENABLE,
+                MF_GRAYED,
+                Some(ID_LOGIN_STATUS),
+            ),
+            (
+                State::Unavailable,
+                false,
+                ID_LOGIN_ENABLE,
+                MF_GRAYED,
+                Some(ID_LOGIN_STATUS),
+            ),
+        ] {
+            unsafe {
+                let menu = CreatePopupMenu().unwrap();
+                fill_menu(menu, &login_menu(Language::ZhHans, state, failed));
+                let flags = GetMenuState(menu, u32::from(id), MF_BYCOMMAND);
+                assert_eq!(flags & (MF_CHECKED | MF_GRAYED).0, expected.0);
+                let mut title = [0u16; 64];
+                let written = GetMenuStringW(menu, u32::from(id), Some(&mut title), MF_BYCOMMAND);
+                assert_eq!(
+                    String::from_utf16_lossy(&title[..written as usize]),
+                    "登录时启动"
+                );
+                if let Some(extra) = extra {
+                    assert_ne!(
+                        GetMenuState(menu, u32::from(extra), MF_BYCOMMAND) & MF_GRAYED.0,
+                        0
+                    );
+                }
+                if state == State::Blocked {
+                    assert_eq!(
+                        GetMenuState(menu, u32::from(ID_LOGIN_DISABLE), MF_BYCOMMAND) & MF_GRAYED.0,
+                        0
+                    );
+                }
+                DestroyMenu(menu).unwrap();
             }
         }
     }

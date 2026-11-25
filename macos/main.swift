@@ -23,7 +23,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         exit(2)
       }
       guard let resources = Bundle.main.resourceURL else { exit(1) }
-      let controller = try AppController(settingsDirectory: directory, resources: resources)
+      let controller = try AppController(
+        settingsDirectory: directory, resources: resources,
+        loginItem: smokeTest ? .unavailable : .system())
       self.controller = controller
       try controller.start()
       if smokeTest {

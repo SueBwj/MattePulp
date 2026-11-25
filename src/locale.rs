@@ -7,10 +7,12 @@ use windows::Win32::Globalization::{
     GetUserDefaultLocaleName, GetUserDefaultUILanguage, LCIDToLocaleName,
 };
 
+use crate::login_item::State as LoginItemState;
 use crate::texture::KIND_NAMES;
 use crate::{
-    ID_EXCLUDE, ID_EXIT, ID_INT_BASE, ID_LANG_EN, ID_LANG_ZH, ID_RESUME, ID_SCHEDULE, ID_SNOOZE_15,
-    ID_SNOOZE_5, ID_TEX_BASE, ID_TOGGLE, ID_TONE_BASE, INTENSITIES,
+    ID_EXCLUDE, ID_EXIT, ID_INT_BASE, ID_LANG_EN, ID_LANG_ZH, ID_LOGIN_DISABLE, ID_LOGIN_ENABLE,
+    ID_LOGIN_ERROR, ID_LOGIN_STATUS, ID_RESUME, ID_SCHEDULE, ID_SNOOZE_15, ID_SNOOZE_5,
+    ID_TEX_BASE, ID_TOGGLE, ID_TONE_BASE, INTENSITIES,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -117,6 +119,11 @@ pub struct MenuCopy {
     pub exclude_empty: &'static str,
     pub language_menu: &'static str,
     pub schedule_title: &'static str,
+    pub launch_at_login: &'static str,
+    pub login_blocked: &'static str,
+    pub remove_login_item: &'static str,
+    pub login_unavailable: &'static str,
+    pub login_change_failed: &'static str,
     pub quit: &'static str,
 }
 
@@ -137,6 +144,11 @@ pub fn menu_copy(language: Language) -> MenuCopy {
             exclude_empty: "排除当前应用",
             language_menu: "语言",
             schedule_title: "定时与日落",
+            launch_at_login: "登录时启动",
+            login_blocked: "登录项已停用或应用位置已变更",
+            remove_login_item: "移除登录项",
+            login_unavailable: "登录项状态不可用",
+            login_change_failed: "未能更改登录启动",
             quit: "退出",
         },
         Language::En => MenuCopy {
@@ -154,6 +166,11 @@ pub fn menu_copy(language: Language) -> MenuCopy {
             exclude_empty: "Exclude current app",
             language_menu: "Language",
             schedule_title: "Schedule & Sunset",
+            launch_at_login: "Launch at login",
+            login_blocked: "Login item disabled or app moved",
+            remove_login_item: "Remove login item",
+            login_unavailable: "Login item status unavailable",
+            login_change_failed: "Could not change launch at login",
             quit: "Quit",
         },
     }
@@ -216,6 +233,8 @@ pub struct MenuRequest<'a> {
     pub foreground: Option<&'a str>,
     pub snoozed: bool,
     pub foreground_excluded: bool,
+    pub login_item: LoginItemState,
+    pub login_change_failed: bool,
 }
 
 pub fn menu_model(request: &MenuRequest<'_>) -> Vec<MenuNode> {
@@ -228,6 +247,8 @@ pub fn menu_model(request: &MenuRequest<'_>) -> Vec<MenuNode> {
         foreground,
         snoozed,
         foreground_excluded,
+        login_item,
+        login_change_failed,
     } = *request;
     let copy = menu_copy(language);
     debug_assert_eq!(KIND_NAMES.len(), 4);
@@ -304,7 +325,7 @@ pub fn menu_model(request: &MenuRequest<'_>) -> Vec<MenuNode> {
         });
     }
 
-    vec![
+    let mut items = vec![
         MenuNode::Command {
             id: ID_TOGGLE,
             label: if enabled {
@@ -358,13 +379,52 @@ pub fn menu_model(request: &MenuRequest<'_>) -> Vec<MenuNode> {
         },
         exclude,
         MenuNode::Separator,
+    ];
+    items.extend(login_menu(language, login_item, login_change_failed));
+    items.extend([
+        MenuNode::Separator,
         MenuNode::Command {
             id: ID_EXIT,
             label: copy.quit.to_string(),
             checked: false,
             enabled: true,
         },
-    ]
+    ]);
+    items
+}
+
+pub fn login_menu(language: Language, state: LoginItemState, change_failed: bool) -> Vec<MenuNode> {
+    let copy = menu_copy(language);
+    let row = |id, label: &str, checked, enabled| MenuNode::Command {
+        id,
+        label: label.to_string(),
+        checked,
+        enabled,
+    };
+    let mut items = vec![row(
+        if state == LoginItemState::On {
+            ID_LOGIN_DISABLE
+        } else {
+            ID_LOGIN_ENABLE
+        },
+        copy.launch_at_login,
+        state == LoginItemState::On,
+        matches!(state, LoginItemState::Off | LoginItemState::On),
+    )];
+    match state {
+        LoginItemState::Blocked => {
+            items.push(row(ID_LOGIN_STATUS, copy.login_blocked, false, false));
+            items.push(row(ID_LOGIN_DISABLE, copy.remove_login_item, false, true));
+        }
+        LoginItemState::Unavailable => {
+            items.push(row(ID_LOGIN_STATUS, copy.login_unavailable, false, false));
+        }
+        LoginItemState::Off | LoginItemState::On => {}
+    }
+    if change_failed {
+        items.push(row(ID_LOGIN_ERROR, copy.login_change_failed, false, false));
+    }
+    items
 }
 
 #[cfg(test)]
@@ -549,6 +609,8 @@ mod tests {
             foreground,
             snoozed,
             foreground_excluded,
+            login_item: LoginItemState::Off,
+            login_change_failed: false,
         })
     }
 

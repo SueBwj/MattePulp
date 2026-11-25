@@ -8,6 +8,7 @@
 mod exclusion;
 mod instance;
 mod locale;
+mod login_item;
 mod monitor;
 mod overlay;
 mod schedule_clock;
@@ -46,6 +47,10 @@ pub const ID_LANG_ZH: u16 = 1501;
 pub const ID_LANG_EN: u16 = 1502;
 pub const ID_SCHEDULE: u16 = 1601;
 pub const ID_TONE_BASE: u16 = 1700; // 1700..1702
+pub const ID_LOGIN_ENABLE: u16 = 1801;
+pub const ID_LOGIN_DISABLE: u16 = 1802;
+pub const ID_LOGIN_STATUS: u16 = 1803;
+pub const ID_LOGIN_ERROR: u16 = 1804;
 
 pub const INTENSITIES: [u32; 4] = [15, 20, 25, 30];
 
@@ -62,6 +67,7 @@ struct App {
     snoozed: bool,
     hidden_by_exclusion: bool,
     applied_visibility: Option<bool>,
+    login_change_failed: bool,
 }
 
 thread_local! {
@@ -74,6 +80,7 @@ thread_local! {
         snoozed: false,
         hidden_by_exclusion: false,
         applied_visibility: None,
+        login_change_failed: false,
     });
 }
 
@@ -264,6 +271,10 @@ fn handle_command(hwnd: HWND, cmd: u32, fg_name: Option<String>) {
         ID_EXIT => unsafe {
             let _ = DestroyWindow(hwnd);
         },
+        ID_LOGIN_ENABLE | ID_LOGIN_DISABLE => {
+            let changed = login_item::change(cmd == ID_LOGIN_ENABLE);
+            APP.with(|app| app.borrow_mut().login_change_failed = !changed);
+        }
         ID_SCHEDULE => {
             let (language, rules) = APP.with(|app| {
                 let app = app.borrow();
@@ -402,6 +413,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             if matches!(event, WM_RBUTTONUP | WM_LBUTTONUP | NIN_KEYSELECT) {
                 // 必须在弹菜单之前捕获前台应用（弹菜单会切前台）
                 let fg = exclusion::foreground_process_name();
+                let login_item = login_item::status();
                 let request = APP.with(|app| {
                     let app = app.borrow();
                     locale::MenuRequest {
@@ -416,6 +428,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                             &app.settings.exclusions,
                             fg.as_deref(),
                         ),
+                        login_item,
+                        login_change_failed: app.login_change_failed,
                     }
                 });
                 let cmd = tray::show_menu(hwnd, &request);

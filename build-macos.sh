@@ -24,9 +24,12 @@ export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-$output/module-cache}
 cargo run --locked --release --manifest-path "$root/Cargo.toml" --bin export_textures -- \
     "$app/Contents/Resources/Textures"
 cargo build --locked --release --manifest-path "$root/Cargo.toml" --lib
+xcrun clang -target arm64-apple-macosx12.0 -fobjc-arc -Wall -Wextra -Werror \
+    -c "$root/macos/LoginItemLegacy.m" -o "$stage/login-item.o"
 xcrun swiftc -swift-version 6 -warnings-as-errors -O -target arm64-apple-macosx12.0 \
-    -module-cache-path "$CLANG_MODULE_CACHE_PATH" -framework AppKit \
-    -import-objc-header "$root/macos/RustBridge.h" "$CARGO_TARGET_DIR/release/libsue_paper.a" \
+    -module-cache-path "$CLANG_MODULE_CACHE_PATH" -framework AppKit -framework CoreServices \
+    -import-objc-header "$root/macos/NativeBridge.h" "$CARGO_TARGET_DIR/release/libsue_paper.a" \
+    "$stage/login-item.o" "$root/macos/LoginItem.swift" \
     "$root/macos/Schedule.swift" "$root/macos/ScheduleWindow.swift" \
     "$root/macos/Settings.swift" "$root/macos/Locale.swift" "$root/macos/Overlay.swift" \
     "$root/macos/IntensitySlider.swift" \

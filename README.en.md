@@ -48,6 +48,12 @@ In a Windows build from this source, the Snooze menu adds "Resume now" while sno
 
 **Mac.** The published image still has the mixed menu and four fixed intensity items. Build `Sue-Paper.app` from this source and click **S** in the menu bar for a one-language menu with a separate language item and a focusable intensity slider panel (15%-30%, 1% steps: drag previews live and saves on release; arrow keys and accessibility adjustments save on every step). Finder shows MattePulp; the executable remains `Sue-Paper`. Settings live in `~/Library/Application Support/Sue-Paper/settings.json`. The app asks for neither Accessibility nor Screen Recording permission.
 
+### Launch at login
+
+In a build from source, **Launch at login** starts unchecked for a new user. Click it in the Windows tray or macOS menu bar to register MattePulp for your account. Click the checked item to turn it off. A disabled or pending registration stays unchecked and can be removed with **Remove login item**.
+
+On Windows, extract the ZIP to a location where it can stay before enabling the option. Windows Task Scheduler starts that copy of `sue-paper.exe` at sign-in. If you move it, remove the old login item and enable it from the new copy. On macOS, the running app bundle is registered with the system. If the menu reports that approval is needed, check Login Items in System Settings.
+
 ### Schedule & Sunset
 
 Open **Schedule & Sunset…** from the Windows tray or macOS menu bar in a build from source. Each rule starts disabled and can be switched on or off separately. Edit and save both rules in the same window, which shows current coverage and the estimated local time of the next automatic change.
