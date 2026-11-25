@@ -27,10 +27,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsDirectory: directory, resources: resources,
         loginItem: smokeTest ? .unavailable : .system())
       self.controller = controller
+      if smokeTest {
+        // The launch/exit check keeps the first-launch language entry off screen.
+        controller.presentLanguageWindow = { _ in }
+      }
       try controller.start()
       if smokeTest {
         guard !controller.overlays.isEmpty, controller.statusItem?.button != nil else { exit(1) }
         print("SMOKE: native menu bar and \(controller.overlays.count) display overlay(s) started")
+        if controller.firstLaunch {
+          guard controller.languagePicker?.window != nil,
+            !FileManager.default.fileExists(atPath: controller.settingsURL.path)
+          else { exit(1) }
+          print("SMOKE: first-launch language entry ready without writing settings")
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { controller.quit() }
       }
     } catch StartupError.alreadyRunning {

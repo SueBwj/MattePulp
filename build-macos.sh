@@ -32,7 +32,7 @@ xcrun swiftc -swift-version 6 -warnings-as-errors -O -target arm64-apple-macosx1
     "$stage/login-item.o" "$root/macos/LoginItem.swift" \
     "$root/macos/Schedule.swift" "$root/macos/ScheduleWindow.swift" \
     "$root/macos/Settings.swift" "$root/macos/Locale.swift" "$root/macos/Overlay.swift" \
-    "$root/macos/IntensitySlider.swift" \
+    "$root/macos/IntensitySlider.swift" "$root/macos/LanguagePicker.swift" \
     "$root/macos/AppController.swift" "$root/macos/main.swift" \
     -o "$app/Contents/MacOS/Sue-Paper"
 cp "$root/macos/Info.plist" "$app/Contents/Info.plist"

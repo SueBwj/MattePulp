@@ -31,6 +31,15 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
   private var snoozeTimer: Timer?
   private var scheduleTimer: Timer?
   private(set) var scheduleWindow: ScheduleWindow?
+  /// True when no settings file existed at launch: the determinable new-install boundary
+  /// for the one-time first-launch language entry.
+  private(set) var firstLaunch = false
+  private(set) var languagePicker: LanguagePickerWindow?
+  /// Optional override used by non-intrusive synthetic fixtures to host the real window
+  /// offscreen.
+  var presentLanguageWindow: ((NSWindow) -> Void)?
+  /// Synthetic tests can supply no screens to avoid creating overlays.
+  var screensProvider: () -> [NSScreen] = { NSScreen.screens }
   private var menuForeground: String?
 
   init(settingsDirectory: URL, resources: URL, loginItem: LoginItem = .unavailable) throws {
@@ -54,6 +63,9 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
       lock = -1
       throw error == EWOULDBLOCK ? StartupError.alreadyRunning : StartupError.lockUnavailable
     }
+    // Checked before loading: a settings file that exists in any form (with or without a
+    // language field, even if unreadable) marks an existing user who never sees the entry.
+    firstLaunch = !FileManager.default.fileExists(atPath: settingsURL.path)
     do { settings = try Settings.load(from: settingsURL) } catch {
       record(error, notice: .loadFailed)
     }
@@ -88,6 +100,33 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
     for name in [NSNotification.Name.NSSystemClockDidChange, .NSSystemTimeZoneDidChange] {
       observe(.default, name) { controller, _ in controller.applyVisibility() }
     }
+    showFirstLaunchLanguage()
+  }
+
+  /// Presents the one-time first-launch language entry. Only a first launch with no
+  /// settings file shows it; confirming persists immediately (follow system keeps
+  /// following the system but ends the entry), and canceling or closing writes nothing,
+  /// so a canceled entry returns on the next launch. The menu bar language submenu keeps
+  /// switching the language afterwards.
+  func showFirstLaunchLanguage() {
+    guard firstLaunch, languagePicker == nil else { return }
+    let picker = LanguagePickerWindow(following: AppLanguage.resolved(saved: settings.language))
+    picker.onChoose = { [weak self] choice in
+      guard let self else { return false }
+      var updated = self.settings
+      updated.language = choice?.rawValue
+      return self.change(updated)
+    }
+    picker.onClose = { [weak self] in self?.languagePicker = nil }
+    languagePicker = picker
+    guard let window = picker.window else { return }
+    if let presentLanguageWindow {
+      presentLanguageWindow(window)
+    } else {
+      window.center()
+      NSApp.activate(ignoringOtherApps: true)
+      window.makeKeyAndOrderFront(nil)
+    }
   }
 
   private func observe(
@@ -111,7 +150,7 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
         domain: "SuePaper", code: 4,
         userInfo: [NSLocalizedDescriptionKey: "No texture loaded for current intensity"])
     }
-    let replacements = NSScreen.screens.map { Overlay(screen: $0, image: image) }
+    let replacements = screensProvider().map { Overlay(screen: $0, image: image) }
     let previous = overlays
     overlays = replacements
     applyVisibility()
@@ -511,6 +550,8 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
   func shutdown() {
     intensityPanel?.close()
     intensityPanel = nil
+    languagePicker?.close()
+    languagePicker = nil
     snoozeTimer?.invalidate()
     snoozeTimer = nil
     scheduleTimer?.invalidate()

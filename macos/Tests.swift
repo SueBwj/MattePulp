@@ -9,6 +9,11 @@ func hasCJK(_ text: String) -> Bool {
 }
 
 @MainActor
+func viewTree(_ view: NSView) -> [NSView] {
+  [view] + view.subviews.flatMap(viewTree)
+}
+
+@MainActor
 func require(_ condition: @autoclosure () -> Bool, _ message: String) {
   if !condition() {
     fputs("FAIL: \(message)\n", stderr)
@@ -235,6 +240,44 @@ func renderSyntheticSliderSnapshots(to evidence: URL) throws {
     }
     try png.write(to: evidence.appendingPathComponent("slider-\(intensity)-synthetic.png"))
   }
+}
+
+/// Renders the first-launch language entry content from synthetic windows in light mode.
+@MainActor
+func writeWindowSnapshot(_ window: NSWindow, to url: URL) throws {
+  window.appearance = NSAppearance(named: .aqua)
+  let content = window.contentView!
+  content.wantsLayer = true
+  content.layer?.backgroundColor = NSColor.white.cgColor
+  content.layoutSubtreeIfNeeded()
+  let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds)
+  require(bitmap != nil, "language entry bitmap created")
+  content.cacheDisplay(in: content.bounds, to: bitmap!)
+  let png = bitmap!.representation(using: .png, properties: [:])
+  require(png != nil, "language entry synthetic PNG encoded")
+  try png!.write(to: url)
+}
+
+@MainActor
+func renderSyntheticLanguagePickerSnapshots(to evidence: URL) throws {
+  try FileManager.default.createDirectory(at: evidence, withIntermediateDirectories: true)
+  for language in [AppLanguage.zhHans, .en] {
+    let picker = LanguagePickerWindow(following: language)
+    let window = picker.window!
+    window.contentView?.layoutSubtreeIfNeeded()
+    let name = "language-picker-\(language.rawValue)-synthetic.png"
+    try writeWindowSnapshot(window, to: evidence.appendingPathComponent(name))
+  }
+  // Failed-save state: the inline retry message stays inside the still-open entry.
+  let failing = LanguagePickerWindow(following: .zhHans)
+  failing.onChoose = { _ in false }
+  let window = failing.window!
+  window.contentView?.layoutSubtreeIfNeeded()
+  let buttons = viewTree(window.contentView!).compactMap { $0 as? NSButton }
+  buttons.first { $0.title == "简体中文" }!.performClick(nil)
+  buttons.first { $0.keyEquivalent == "\r" }!.performClick(nil)
+  try writeWindowSnapshot(
+    window, to: evidence.appendingPathComponent("language-picker-failure-zh-Hans-synthetic.png"))
 }
 
 @MainActor
@@ -500,6 +543,12 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
   }
 
   func configureController(_ candidate: AppController) {
+    // Keep the real first-launch language entry offscreen for the lifecycle suite so it
+    // never steals focus or writes; its behavior is covered by exerciseLanguagePicker.
+    candidate.presentLanguageWindow = { window in
+      window.setFrameOrigin(NSPoint(x: -10000, y: -10000))
+      window.orderBack(nil)
+    }
     if skipForegroundTests {
       // Keep the real panel offscreen so paused foreground-switcher tests never steal focus.
       candidate.presentIntensityPanel = { panel, _ in
@@ -514,8 +563,252 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
   }
 
+  /// Behavioral coverage of the one-time first-launch language entry in its own settings
+  /// directories: fresh install, live re-localization, keyboard cancel, cancel writing
+  /// nothing, re-presentation after cancel, Return confirming a choice, menu still
+  /// switching afterwards, upgrade keeping the saved language, legacy files without a
+  /// language field following the system, the follow-system choice, and storage failure
+  /// with retry. Every window is hosted offscreen; nothing forces the foreground.
+  func exerciseLanguagePicker() throws {
+    let systemLanguage = AppLanguage.resolved(saved: nil)
+    let systemFollowTitle = systemLanguage == .zhHans ? "跟随系统" : "Follow system"
+    let systemEntryTitle = systemLanguage == .zhHans ? "选择语言" : "Choose Language"
+    func synthesize(_ candidate: AppController) {
+      candidate.presentLanguageWindow = { _ in }
+      candidate.screensProvider = { [] }
+      candidate.foregroundIdentityProvider = { "com.suepaper.synthetic.included" }
+    }
+    func controls(of window: NSWindow) -> (
+      follow: NSButton, chinese: NSButton, english: NSButton, ok: NSButton, cancel: NSButton,
+      fields: [NSTextField]
+    ) {
+      let views = viewTree(window.contentView!)
+      let buttons = views.compactMap { $0 as? NSButton }
+      let fields = views.compactMap { $0 as? NSTextField }
+      // The confirm button keeps "\r" only while its window is key; AppKit hands the
+      // Return key to the window's defaultButtonCell once the window is not key, so
+      // either identity identifies the same native control.
+      let ok =
+        buttons.first { $0.keyEquivalent == "\r" }
+        ?? buttons.first { $0.cell === window.defaultButtonCell }
+      let follow = buttons.first { $0.title == "跟随系统" || $0.title == "Follow system" }
+      let chinese = buttons.first { $0.title == "简体中文" }
+      let english = buttons.first { $0.title == "English" }
+      let cancel = buttons.first { $0.keyEquivalent == "\u{1b}" }
+      require(
+        follow != nil && chinese != nil && english != nil && ok != nil && cancel != nil,
+        "entry exposes its native radio, confirm and cancel controls")
+      return (follow!, chinese!, english!, ok!, cancel!, fields)
+    }
+    func keyboardEvent(_ keyCode: UInt16, _ characters: String, to window: NSWindow) -> NSEvent {
+      NSEvent.keyEvent(
+        with: .keyDown, location: .zero, modifierFlags: [],
+        timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: window.windowNumber, context: nil,
+        characters: characters, charactersIgnoringModifiers: characters,
+        isARepeat: false, keyCode: keyCode)!
+    }
+
+    let settingsDirectory = scratch.appendingPathComponent("language-picker")
+    try FileManager.default.createDirectory(
+      at: settingsDirectory, withIntermediateDirectories: true)
+    var controller = try AppController(settingsDirectory: settingsDirectory, resources: resources)
+    synthesize(controller)
+    try controller.start()
+    require(controller.firstLaunch, "fresh install counts as first launch")
+    require(
+      !FileManager.default.fileExists(atPath: controller.settingsURL.path),
+      "presenting the entry writes no settings")
+    var window = controller.languagePicker!.window!
+    require(!window.isVisible, "synthetic entry stays offscreen")
+    var controlsIn = controls(of: window)
+    require(
+      window.title == systemEntryTitle && controlsIn.follow.title == systemFollowTitle,
+      "the entry follows the system language before any choice")
+    require(
+      controlsIn.follow.state == .on && controlsIn.chinese.state == .off
+        && controlsIn.english.state == .off,
+      "follow system is preselected")
+    controlsIn.chinese.performClick(nil)
+    require(
+      window.title == "选择语言" && controlsIn.follow.title == "跟随系统",
+      "choosing Simplified Chinese re-localizes the entry immediately")
+    controlsIn.english.performClick(nil)
+    require(
+      window.title == "Choose Language" && controlsIn.follow.title == "Follow system",
+      "choosing English re-localizes the entry immediately")
+    controlsIn.follow.performClick(nil)
+    require(window.title == systemEntryTitle, "follow system returns to the system language")
+    // Escape routes to the cancel button and writes nothing.
+    require(
+      window.contentView!.performKeyEquivalent(with: keyboardEvent(53, "\u{1b}", to: window)),
+      "Escape is bound to cancel")
+    require(controller.languagePicker == nil, "Escape closes the entry")
+    require(
+      !FileManager.default.fileExists(atPath: controller.settingsURL.path),
+      "Escape cancels without writing settings")
+    controller.showFirstLaunchLanguage()
+    window = controller.languagePicker!.window!
+    controlsIn = controls(of: window)
+    controlsIn.cancel.performClick(nil)
+    require(controller.languagePicker == nil, "cancel closes the entry")
+    require(
+      !FileManager.default.fileExists(atPath: controller.settingsURL.path),
+      "cancel writes nothing")
+    require(controller.settings.language == nil, "cancel keeps following the system")
+
+    // A cancelled first launch stays a first launch on the next launch.
+    controller.shutdown()
+    controller = try AppController(settingsDirectory: settingsDirectory, resources: resources)
+    synthesize(controller)
+    try controller.start()
+    require(controller.firstLaunch, "a cancelled first launch stays a first launch")
+    window = controller.languagePicker!.window!
+    require(!window.isVisible, "the returning synthetic entry stays offscreen")
+    controlsIn = controls(of: window)
+    // Return confirms through the native default button; the click drives the same action.
+    controlsIn.english.performClick(nil)
+    require(
+      window.defaultButtonCell === controlsIn.ok.cell,
+      "OK is the default button, so Return confirms")
+    controlsIn.ok.performClick(nil)
+    require(controller.languagePicker == nil, "confirming closes the entry")
+    require(controller.settings.language == "en", "the first-launch choice applies immediately")
+    let saved = try Settings.load(from: controller.settingsURL)
+    require(saved.language == "en", "the first-launch choice persists to disk")
+    let menu = controller.statusItem!.menu!
+    controller.menuNeedsUpdate(menu)
+    require(menu.item(at: 0)?.title == "Enable paper texture", "menu localizes to the choice")
+    require(
+      controller.statusItem?.button?.accessibilityLabel() == "MattePulp",
+      "menu bar accessibility localizes to the choice")
+    // The menu bar language submenu still switches after a first-launch choice.
+    menu.item(at: 3)!.submenu!.performActionForItem(at: 0)
+    controller.menuNeedsUpdate(menu)
+    require(
+      controller.settings.language == "zh-Hans" && menu.item(at: 0)?.title == "启用纸张纹理",
+      "the menu still switches language after the first-launch choice")
+
+    // Upgrade: an existing settings file never shows the entry and keeps the language.
+    controller.shutdown()
+    controller = try AppController(settingsDirectory: settingsDirectory, resources: resources)
+    synthesize(controller)
+    try controller.start()
+    require(!controller.firstLaunch, "an existing settings file ends the first-launch boundary")
+    require(controller.languagePicker == nil, "no entry for an existing user")
+    require(controller.settings.language == "zh-Hans", "upgrade keeps the saved language")
+    let upgradeMenu = controller.statusItem!.menu!
+    controller.menuNeedsUpdate(upgradeMenu)
+    require(
+      upgradeMenu.item(at: 0)?.title == "启用纸张纹理",
+      "menu stays on the saved language after upgrade")
+    controller.shutdown()
+
+    // Legacy settings without a language field keep following the system, without entry.
+    let legacyDirectory = scratch.appendingPathComponent("language-picker-legacy")
+    try FileManager.default.createDirectory(
+      at: legacyDirectory, withIntermediateDirectories: true)
+    try Data(
+      #"{"enabled":false,"intensity":15,"texture":"Parchment","exclusions":["com.example.legacy"]}"#
+        .utf8
+    )
+    .write(to: legacyDirectory.appendingPathComponent("settings.json"))
+    let legacy = try AppController(settingsDirectory: legacyDirectory, resources: resources)
+    legacy.presentLanguageWindow = { _ in
+      require(false, "legacy settings without a language field never present the entry")
+    }
+    legacy.screensProvider = { [] }
+    legacy.foregroundIdentityProvider = { "com.suepaper.synthetic.included" }
+    try legacy.start()
+    require(
+      !legacy.firstLaunch && legacy.languagePicker == nil, "old settings never show the entry")
+    require(
+      !legacy.settings.enabled && legacy.settings.intensity == 15
+        && legacy.settings.texture == "Parchment"
+        && legacy.settings.exclusions == ["com.example.legacy"],
+      "legacy settings load unchanged")
+    require(legacy.settings.language == nil, "old settings keep following the system")
+    let legacyMenu = legacy.statusItem!.menu!
+    legacy.menuNeedsUpdate(legacyMenu)
+    require(
+      legacyMenu.item(at: 0)?.title == MenuText.resolved(saved: nil).toggle,
+      "legacy menu follows the system language")
+    legacy.shutdown()
+
+    // Following the system confirms without a language key but ends the entry.
+    let systemDirectory = scratch.appendingPathComponent("language-picker-system")
+    try FileManager.default.createDirectory(
+      at: systemDirectory, withIntermediateDirectories: true)
+    var follower = try AppController(settingsDirectory: systemDirectory, resources: resources)
+    synthesize(follower)
+    try follower.start()
+    require(
+      follower.firstLaunch && follower.languagePicker != nil,
+      "fresh follow-system install presents the entry")
+    controls(of: follower.languagePicker!.window!).ok.performClick(nil)
+    require(follower.languagePicker == nil, "confirming follow system closes the entry")
+    require(
+      FileManager.default.fileExists(atPath: follower.settingsURL.path),
+      "follow system persists the first-launch boundary")
+    let persistedText = try String(contentsOf: follower.settingsURL, encoding: .utf8)
+    require(!persistedText.contains("\"language\""), "follow system writes no language key")
+    require(follower.settings.language == nil, "follow system keeps following the system")
+    follower.shutdown()
+    follower = try AppController(settingsDirectory: systemDirectory, resources: resources)
+    synthesize(follower)
+    try follower.start()
+    require(
+      !follower.firstLaunch && follower.languagePicker == nil,
+      "the entry never returns after following the system")
+    require(follower.settings.language == nil, "follow system survives restart")
+    follower.shutdown()
+
+    // A failed save keeps the entry open with an inline retry; cancel still writes nothing.
+    let failingDirectory = scratch.appendingPathComponent("language-picker-failure")
+    try FileManager.default.createDirectory(
+      at: failingDirectory, withIntermediateDirectories: true)
+    let failing = try AppController(settingsDirectory: failingDirectory, resources: resources)
+    synthesize(failing)
+    try failing.start()
+    require(failing.languagePicker != nil, "failure install presents the entry")
+    // Replacing settings.json with a directory guarantees atomic save fails predictably.
+    try FileManager.default.createDirectory(
+      at: failing.settingsURL, withIntermediateDirectories: false)
+    var failingControls = controls(of: failing.languagePicker!.window!)
+    failingControls.chinese.performClick(nil)
+    failingControls.ok.performClick(nil)
+    require(failing.languagePicker != nil, "a failed save keeps the entry open")
+    require(failing.settings.language == nil, "a failed save applies no language")
+    require(
+      failingControls.fields.contains {
+        $0.stringValue.contains("保存失败") || $0.stringValue.contains("Could not save")
+      },
+      "a failed save shows the native retry message")
+    failingControls.cancel.performClick(nil)
+    require(failing.languagePicker == nil, "cancel closes after a failed save")
+    require(failing.settings.language == nil, "cancel after a failed save writes nothing")
+    try FileManager.default.removeItem(at: failing.settingsURL)
+    failing.showFirstLaunchLanguage()
+    require(failing.languagePicker != nil, "the entry returns after cancel")
+    failingControls = controls(of: failing.languagePicker!.window!)
+    failingControls.chinese.performClick(nil)
+    failingControls.ok.performClick(nil)
+    require(
+      failing.languagePicker == nil && failing.settings.language == "zh-Hans",
+      "retry after storage recovery persists")
+    let retried = try Settings.load(from: failing.settingsURL)
+    require(
+      retried.language == "zh-Hans" && failing.lastError == nil,
+      "retry persists to disk and clears the error")
+    failing.shutdown()
+    print(
+      "PASS: first-launch language entry (fresh install, live re-localization, Escape cancel, cancel writes nothing, re-presentation, Return confirm, menu switching, upgrade, legacy follow-system, follow-system choice, storage failure retry)"
+    )
+  }
+
   func applicationDidFinishLaunching(_ notification: Notification) {
     do {
+      try exerciseLanguagePicker()
       controller = try AppController(
         settingsDirectory: scratch.appendingPathComponent("lifecycle"), resources: resources)
       configureController(controller)
@@ -1343,7 +1636,13 @@ struct Tests {
     try textureTests(resources: resources, evidence: evidence)
     try toneTextureTests(resources: resources, evidence: evidence)
     try toneMenuTests(resources: resources, scratch: scratch)
-    if CommandLine.arguments.last == "--fixtures-only" { return }
+    try renderSyntheticLanguagePickerSnapshots(to: evidence)
+    if CommandLine.arguments.last == "--fixtures-only" {
+      app.setActivationPolicy(.prohibited)
+      let fixture = TestDelegate(resources: resources, scratch: scratch, skipForegroundTests: true)
+      try fixture.exerciseLanguagePicker()
+      return
+    }
     app.setActivationPolicy(skipForeground ? .prohibited : .regular)
     let delegate = TestDelegate(
       resources: resources, scratch: scratch, skipForegroundTests: skipForeground)

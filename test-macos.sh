@@ -25,7 +25,7 @@ xcrun swiftc -swift-version 6 -warnings-as-errors -target arm64-apple-macosx12.0
     "$scratch/login-item.o" "$root/macos/LoginItem.swift" \
     "$root/macos/Schedule.swift" "$root/macos/ScheduleWindow.swift" \
     "$root/macos/Settings.swift" "$root/macos/Locale.swift" "$root/macos/Overlay.swift" \
-    "$root/macos/IntensitySlider.swift" \
+    "$root/macos/IntensitySlider.swift" "$root/macos/LanguagePicker.swift" \
     "$root/macos/AppController.swift" "$root/macos/Tests.swift" \
     -o "$scratch/tests"
 "$scratch/tests" "$output/Sue-Paper.app/Contents/Resources" "$scratch" "$output/test-results" \
