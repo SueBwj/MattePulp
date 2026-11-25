@@ -682,12 +682,31 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     require(
       controller.statusItem?.button?.accessibilityLabel() == "MattePulp",
       "menu bar accessibility localizes to the choice")
-    // The menu bar language submenu still switches after a first-launch choice.
-    menu.item(at: 3)!.submenu!.performActionForItem(at: 0)
+    let toneMenu = menu.items.compactMap(\.submenu).first {
+      $0.items.contains { $0.action == #selector(AppController.selectTone(_:)) }
+    }!
+    let warmPaperIndex = toneMenu.items.firstIndex {
+      ($0.representedObject as? String) == PaperTone.warmPaper.rawValue
+    }!
+    toneMenu.performActionForItem(at: warmPaperIndex)
+    controller.menuNeedsUpdate(menu)
+
+    // Each submenu has its own action, independent of its position.
+    let languageMenu = menu.items.compactMap(\.submenu).first {
+      $0.items.contains { $0.action == #selector(AppController.selectLanguage(_:)) }
+    }!
+    let chineseIndex = languageMenu.items.firstIndex {
+      ($0.representedObject as? String) == AppLanguage.zhHans.rawValue
+    }!
+    languageMenu.performActionForItem(at: chineseIndex)
     controller.menuNeedsUpdate(menu)
     require(
       controller.settings.language == "zh-Hans" && menu.item(at: 0)?.title == "启用纸张纹理",
       "the menu still switches language after the first-launch choice")
+    let combinedSettings = try Settings.load(from: controller.settingsURL)
+    require(
+      combinedSettings.tone == .warmPaper && combinedSettings.language == "zh-Hans",
+      "switching language preserves the chosen tone")
 
     // Upgrade: an existing settings file never shows the entry and keeps the language.
     controller.shutdown()
