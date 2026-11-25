@@ -8,7 +8,7 @@ use windows::Win32::Foundation::{
     E_INVALIDARG, HANDLE, HLOCAL, RPC_E_CHANGED_MODE, VARIANT_BOOL, VARIANT_FALSE,
 };
 use windows::Win32::Security::Authorization::ConvertSidToStringSidW;
-use windows::Win32::Security::{GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER};
+use windows::Win32::Security::{GetTokenInformation, TokenUser, PSID, TOKEN_QUERY, TOKEN_USER};
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
     COINIT_APARTMENTTHREADED,
@@ -269,11 +269,17 @@ fn user_sid() -> Result<BSTR> {
             &mut size,
         )?;
         let user = &*buffer.as_ptr().cast::<TOKEN_USER>();
+        sid_text(user.User.Sid)
+    }
+}
+
+unsafe fn sid_text(sid: PSID) -> Result<BSTR> {
+    unsafe {
         let mut text = PWSTR::null();
-        ConvertSidToStringSidW(user.User.Sid, &mut text)?;
-        let sid = BSTR::from_wide(text.as_wide());
+        ConvertSidToStringSidW(sid, &mut text)?;
+        let result = BSTR::from_wide(text.as_wide());
         let _ = LocalFree(HLOCAL(text.0.cast()));
-        sid
+        result
     }
 }
 
@@ -283,6 +289,65 @@ mod tests {
     use std::cell::Cell;
     use std::fs;
     use std::path::Path;
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::ERROR_NONE_MAPPED;
+    use windows::Win32::Security::Authorization::ConvertStringSidToSidW;
+    use windows::Win32::Security::{LookupAccountNameW, SID_NAME_USE};
+    use windows::Win32::System::TaskScheduler::{TASK_LOGON_TYPE, TASK_RUNLEVEL_TYPE};
+
+    fn account_matches_sid(user_id: &BSTR, expected: &BSTR) -> Result<bool> {
+        if user_id.is_empty() || user_id.as_wide().contains(&0) {
+            return Ok(false);
+        }
+        let name = PCWSTR(user_id.as_ptr());
+        unsafe {
+            // Resolve full SID strings first. An account name like "BA" can also
+            // be an SDDL alias, so only pass full SID strings to the SID parser.
+            let wide = user_id.as_wide();
+            let mut parsed = PSID::default();
+            if (wide.starts_with(&[u16::from(b'S'), u16::from(b'-')])
+                || wide.starts_with(&[u16::from(b's'), u16::from(b'-')]))
+                && ConvertStringSidToSidW(name, &mut parsed).is_ok()
+            {
+                let resolved = sid_text(parsed);
+                let _ = LocalFree(HLOCAL(parsed.0));
+                return resolved.map(|sid| sid == *expected);
+            }
+
+            let mut sid_size = 0;
+            let mut domain_len = 0;
+            let mut kind = SID_NAME_USE::default();
+            let error = LookupAccountNameW(
+                PCWSTR::null(),
+                name,
+                PSID::default(),
+                &mut sid_size,
+                PWSTR::null(),
+                &mut domain_len,
+                &mut kind,
+            )
+            .expect_err("sizing lookup has no SID buffer");
+            if error.code() == HRESULT::from_win32(ERROR_NONE_MAPPED.0) {
+                return Ok(false);
+            }
+            if error.code() != HRESULT::from_win32(ERROR_INSUFFICIENT_BUFFER.0) {
+                return Err(error);
+            }
+            let mut sid_buffer = vec![0usize; (sid_size as usize).div_ceil(size_of::<usize>())];
+            let mut domain = vec![0u16; domain_len as usize];
+            let sid = PSID(sid_buffer.as_mut_ptr().cast());
+            LookupAccountNameW(
+                PCWSTR::null(),
+                name,
+                sid,
+                &mut sid_size,
+                PWSTR(domain.as_mut_ptr()),
+                &mut domain_len,
+                &mut kind,
+            )?;
+            Ok(sid_text(sid)? == *expected)
+        }
+    }
 
     struct Fixture<'a> {
         directory: &'a Path,
@@ -387,20 +452,51 @@ mod tests {
         let executable = BSTR::from(r"C:\Paper Test\柔纸\sue-paper.exe");
         let definition = scheduler.definition(&executable)?;
         unsafe {
-            let action = definition.Actions()?.get_Item(1)?.cast::<IExecAction>()?;
+            let mut source = BSTR::new();
+            definition.RegistrationInfo()?.Source(&mut source)?;
+            assert_eq!(source, SOURCE);
+
+            let principal = definition.Principal()?;
+            let mut user = BSTR::new();
+            principal.UserId(&mut user)?;
+            assert!(account_matches_sid(&user, &scheduler.sid)?);
+            let mut logon_type = TASK_LOGON_TYPE::default();
+            principal.LogonType(&mut logon_type)?;
+            assert_eq!(logon_type, TASK_LOGON_INTERACTIVE_TOKEN);
+            let mut run_level = TASK_RUNLEVEL_TYPE::default();
+            principal.RunLevel(&mut run_level)?;
+            assert_eq!(run_level, TASK_RUNLEVEL_LUA);
+
+            let actions = definition.Actions()?;
+            let mut action_count = 0;
+            actions.Count(&mut action_count)?;
+            assert_eq!(action_count, 1);
+            let action = actions.get_Item(1)?.cast::<IExecAction>()?;
             let mut path = BSTR::new();
             let mut arguments = BSTR::new();
             action.Path(&mut path)?;
             action.Arguments(&mut arguments)?;
             assert_eq!(path, executable);
             assert!(arguments.is_empty());
-            let trigger = definition
-                .Triggers()?
-                .get_Item(1)?
-                .cast::<ILogonTrigger>()?;
-            let mut user = BSTR::new();
+            let triggers = definition.Triggers()?;
+            let mut trigger_count = 0;
+            triggers.Count(&mut trigger_count)?;
+            assert_eq!(trigger_count, 1);
+            let trigger = triggers.get_Item(1)?.cast::<ILogonTrigger>()?;
             trigger.UserId(&mut user)?;
-            assert_eq!(user, scheduler.sid);
+            assert!(account_matches_sid(&user, &scheduler.sid)?);
+            assert!(account_matches_sid(&scheduler.sid, &scheduler.sid)?);
+            assert!(!account_matches_sid(&BSTR::new(), &scheduler.sid)?);
+
+            let mut other_sid = BSTR::from("S-1-5-18");
+            if other_sid == scheduler.sid {
+                other_sid = BSTR::from("S-1-5-19");
+            }
+            assert!(!account_matches_sid(&other_sid, &scheduler.sid)?);
+            trigger.SetUserId(&other_sid)?;
+            trigger.UserId(&mut user)?;
+            assert!(account_matches_sid(&user, &other_sid)?);
+            assert!(!account_matches_sid(&user, &scheduler.sid)?);
         }
         Ok(())
     }
