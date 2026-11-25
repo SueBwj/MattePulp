@@ -21,14 +21,29 @@ struct TextureStore {
     }
   }
 
-  func image(texture: String, intensity: Int) throws -> CGImage {
+  func image(texture: String, intensity: Int, tone: PaperTone) throws -> CGImage {
     guard Settings.textures.contains(texture), Settings.intensityRange.contains(intensity) else {
       throw NSError(domain: "SuePaper", code: 2)
     }
-    let data = try Data(
+    var data = try Data(
       contentsOf: directory.appendingPathComponent("\(texture)-\(intensity).bgra"))
-    guard data.count == 512 * 512 * 4,
-      let provider = CGDataProvider(data: data as CFData),
+    guard data.count == 512 * 512 * 4 else {
+      throw NSError(
+        domain: "SuePaper", code: 3,
+        userInfo: [NSLocalizedDescriptionKey: "Invalid texture pixels"])
+    }
+    let code =
+      switch tone {
+      case .original: MATTE_TONE_ORIGINAL
+      case .lightWarm: MATTE_TONE_LIGHT_WARM
+      case .warmPaper: MATTE_TONE_WARM_PAPER
+      }
+    if code != MATTE_TONE_ORIGINAL {
+      data.withUnsafeMutableBytes { (bytes: UnsafeMutableRawBufferPointer) in
+        matte_apply_tone(bytes.bindMemory(to: UInt8.self).baseAddress!, bytes.count, UInt8(code))
+      }
+    }
+    guard let provider = CGDataProvider(data: data as CFData),
       let image = CGImage(
         width: 512, height: 512, bitsPerComponent: 8, bitsPerPixel: 32,
         bytesPerRow: 512 * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
@@ -43,12 +58,11 @@ struct TextureStore {
     return image
   }
 
-  /// Every intensity level of one texture, preloaded so that previewing a slider drag
-  /// or keyboard step never touches the settings storage or the disk.
-  func images(texture: String) throws -> [Int: CGImage] {
+  /// Preload the selected texture and tone so slider previews never read from disk.
+  func images(texture: String, tone: PaperTone) throws -> [Int: CGImage] {
     var images: [Int: CGImage] = [:]
     for intensity in Settings.intensityRange {
-      images[intensity] = try image(texture: texture, intensity: intensity)
+      images[intensity] = try image(texture: texture, intensity: intensity, tone: tone)
     }
     return images
   }

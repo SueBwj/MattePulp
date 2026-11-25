@@ -9,11 +9,100 @@ func hasCJK(_ text: String) -> Bool {
 }
 
 @MainActor
+func viewTree(_ view: NSView) -> [NSView] {
+  [view] + view.subviews.flatMap(viewTree)
+}
+
+@MainActor
 func require(_ condition: @autoclosure () -> Bool, _ message: String) {
   if !condition() {
     fputs("FAIL: \(message)\n", stderr)
     exit(1)
   }
+}
+
+@MainActor
+func loginItemTests(resources: URL, scratch: URL) throws {
+  let app = "com.suebwj.sue-paper"
+  let other = "com.example.other"
+  var registrations: [String: LoginItemState] = [other: .on]
+  var readUnavailable = false
+  var writeError = false
+  var nextEnabledState: LoginItemState = .on
+  var writes = 0
+  let service = LoginItem(
+    status: { readUnavailable ? .unavailable : (registrations[app] ?? .off) },
+    write: { enabled in
+      writes += 1
+      if writeError { throw LoginItemError.registrationFailed }
+      registrations[app] = enabled ? nextEnabledState : nil
+    })
+  func controller() throws -> AppController {
+    try AppController(settingsDirectory: scratch, resources: resources, loginItem: service)
+  }
+  let first = try controller()
+  let english = MenuText.make(.en)
+  let chinese = MenuText.make(.zhHans)
+  func menu(_ controller: AppController, _ text: MenuText = MenuText.make(.en)) -> NSMenu {
+    let menu = NSMenu()
+    controller.appendLoginItemMenu(to: menu, text: text)
+    return menu
+  }
+  let open = menu(first)
+  require(
+    open.items.count == 1 && open.items[0].title == "Launch at login"
+      && open.items[0].state == .off && open.items[0].isEnabled && writes == 0,
+    "opening the native menu keeps launch at login off")
+  open.performActionForItem(at: 0)
+  open.performActionForItem(at: 0)
+  require(writes == 1, "repeated opt-in is idempotent")
+  let reopened = try controller()
+  let on = menu(reopened, chinese)
+  require(
+    on.items[0].title == "登录时启动" && on.items[0].state == .on,
+    "recreated controller shows the live registration in Chinese")
+
+  writeError = true
+  on.performActionForItem(at: 0)
+  let failedRemoval = menu(reopened)
+  require(
+    failedRemoval.items[0].state == .on
+      && failedRemoval.items[1].title == english.loginChangeFailed,
+    "failed opt-out reports the failure and keeps the actual state")
+  writeError = false
+  on.performActionForItem(at: 0)
+  on.performActionForItem(at: 0)
+  require(writes == 3 && menu(reopened).items[0].state == .off, "repeated opt-out is idempotent")
+
+  writeError = true
+  open.performActionForItem(at: 0)
+  let failedEnable = menu(first)
+  require(
+    failedEnable.items[0].state == .off && failedEnable.items[1].title == english.loginChangeFailed,
+    "failed opt-in never checks launch at login")
+  writeError = false
+  nextEnabledState = .requiresApproval
+  open.performActionForItem(at: 0)
+  let pending = menu(first)
+  require(
+    pending.items.count == 3 && pending.items[0].state == .off && !pending.items[0].isEnabled
+      && pending.items[1].title == english.loginApproval,
+    "system approval is a separate, unchecked state")
+  pending.performActionForItem(at: 2)
+  require(
+    registrations[app] == nil && registrations[other] == .on,
+    "removing the pending item leaves the other registration alone")
+
+  readUnavailable = true
+  let unavailable = menu(first, chinese)
+  require(
+    unavailable.items[0].state == .off && !unavailable.items[0].isEnabled
+      && unavailable.items[1].title == chinese.loginUnavailable,
+    "lookup failure disables the checkbox and reports unknown state")
+  readUnavailable = false
+  registrations[app] = .on
+  require(menu(first).items[0].state == .on, "menu reads external state changes")
+  print("PASS: AppKit login item menu with isolated registration states")
 }
 
 @MainActor
@@ -24,6 +113,21 @@ func settingsTests(_ scratch: URL) throws {
   let partial = try JSONDecoder().decode(Settings.self, from: Data("{\"enabled\":false}".utf8))
   require(!partial.enabled && partial.intensity == 20, "partial settings keep defaults")
   require(partial.language == nil, "old settings omit language")
+  let toneBase = """
+    "enabled":false,"texture":"Parchment","intensity":17,"language":"en",
+    "exclusions":["com.example.fixture"],"schedule":{"timed":true,"start":"21:00","end":"22:00"}
+    """
+  let oldTone = try JSONDecoder().decode(Settings.self, from: Data("{\(toneBase)}".utf8))
+  require(
+    oldTone.tone == .original && !oldTone.enabled && oldTone.texture == "Parchment"
+      && oldTone.intensity == 17 && oldTone.language == "en"
+      && oldTone.exclusions == ["com.example.fixture"] && oldTone.schedule.validTime,
+    "old settings retain their texture, intensity, language, exclusions and schedule")
+  for invalid in ["null", "[]", "42", "{}", #""Sepia""#] {
+    let data = Data("{\(toneBase),\"tone\":\(invalid)}".utf8)
+    let decoded = try JSONDecoder().decode(Settings.self, from: data)
+    require(decoded == oldTone, "invalid tone preserves every other field")
+  }
   let unknown = try JSONDecoder().decode(
     Settings.self,
     from: Data("{\"enabled\":false,\"intensity\":15,\"language\":\"zh-Hant\"}".utf8))
@@ -138,28 +242,68 @@ func renderSyntheticSliderSnapshots(to evidence: URL) throws {
   }
 }
 
+/// Renders the first-launch language entry content from synthetic windows in light mode.
+@MainActor
+func writeWindowSnapshot(_ window: NSWindow, to url: URL) throws {
+  window.appearance = NSAppearance(named: .aqua)
+  let content = window.contentView!
+  content.wantsLayer = true
+  content.layer?.backgroundColor = NSColor.white.cgColor
+  content.layoutSubtreeIfNeeded()
+  let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds)
+  require(bitmap != nil, "language entry bitmap created")
+  content.cacheDisplay(in: content.bounds, to: bitmap!)
+  let png = bitmap!.representation(using: .png, properties: [:])
+  require(png != nil, "language entry synthetic PNG encoded")
+  try png!.write(to: url)
+}
+
+@MainActor
+func renderSyntheticLanguagePickerSnapshots(to evidence: URL) throws {
+  try FileManager.default.createDirectory(at: evidence, withIntermediateDirectories: true)
+  for language in [AppLanguage.zhHans, .en] {
+    let picker = LanguagePickerWindow(following: language)
+    let window = picker.window!
+    window.contentView?.layoutSubtreeIfNeeded()
+    let name = "language-picker-\(language.rawValue)-synthetic.png"
+    try writeWindowSnapshot(window, to: evidence.appendingPathComponent(name))
+  }
+  // Failed-save state: the inline retry message stays inside the still-open entry.
+  let failing = LanguagePickerWindow(following: .zhHans)
+  failing.onChoose = { _ in false }
+  let window = failing.window!
+  window.contentView?.layoutSubtreeIfNeeded()
+  let buttons = viewTree(window.contentView!).compactMap { $0 as? NSButton }
+  buttons.first { $0.title == "简体中文" }!.performClick(nil)
+  buttons.first { $0.keyEquivalent == "\r" }!.performClick(nil)
+  try writeWindowSnapshot(
+    window, to: evidence.appendingPathComponent("language-picker-failure-zh-Hans-synthetic.png"))
+}
+
+@MainActor
+func renderTexture(_ image: CGImage, scale: CGFloat) -> CGContext {
+  let context = CGContext(
+    data: nil, width: 1024, height: 1024, bitsPerComponent: 8,
+    bytesPerRow: 4096, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+  context.scaleBy(x: scale, y: scale)
+  TextureView.draw(
+    image, in: context,
+    bounds: CGRect(x: 0, y: 0, width: 1024 / scale, height: 1024 / scale), scale: scale)
+  return context
+}
+
 @MainActor
 func textureTests(resources: URL, evidence: URL) throws {
   let store = try TextureStore(directory: resources.appendingPathComponent("Textures"))
   try FileManager.default.createDirectory(at: evidence, withIntermediateDirectories: true)
-  func render(_ image: CGImage, scale: CGFloat) -> CGContext {
-    let context = CGContext(
-      data: nil, width: 1024, height: 1024, bitsPerComponent: 8,
-      bytesPerRow: 4096, space: CGColorSpace(name: CGColorSpace.sRGB)!,
-      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-    context.scaleBy(x: scale, y: scale)
-    TextureView.draw(
-      image, in: context,
-      bounds: CGRect(x: 0, y: 0, width: 1024 / scale, height: 1024 / scale), scale: scale)
-    return context
-  }
   var fingerprints = Set<Data>()
   for texture in store.catalog {
     var previousAlpha = 0
     for intensity in Settings.intensityRange {
-      let image = try store.image(texture: texture.id, intensity: intensity)
-      let normal = render(image, scale: 1)
-      let retina = render(image, scale: 2)
+      let image = try store.image(texture: texture.id, intensity: intensity, tone: .original)
+      let normal = renderTexture(image, scale: 1)
+      let retina = renderTexture(image, scale: 2)
       let bytes = Data(bytes: normal.data!, count: 4096 * 1024)
       require(
         bytes == Data(bytes: retina.data!, count: 4096 * 1024), "Retina physical pixels match 1x")
@@ -198,6 +342,135 @@ func textureTests(resources: URL, evidence: URL) throws {
   try renderSyntheticSliderSnapshots(to: evidence)
   print(
     "PASS: 4 textures x 16 intensities, monotonic strength, seamless repeats and 1x/2x equality")
+}
+
+@MainActor
+func toneTextureTests(resources: URL, evidence: URL) throws {
+  let store = try TextureStore(directory: resources.appendingPathComponent("Textures"))
+  for texture in store.catalog {
+    for intensity in [15, 17, 20, 30] {
+      var original: Data?
+      for tone in PaperTone.allCases {
+        let image = try store.image(texture: texture.id, intensity: intensity, tone: tone)
+        let normal = renderTexture(image, scale: 1)
+        let retina = renderTexture(image, scale: 2)
+        let bytes = Data(bytes: normal.data!, count: 4096 * 1024)
+        require(bytes == Data(bytes: retina.data!, count: bytes.count), "tone 1x/2x pixel equality")
+        require(bytes[0..<2048] == bytes[2048..<4096], "tone horizontal tile repeat")
+        require(bytes[0..<4096] == bytes[(512 * 4096)..<(513 * 4096)], "tone vertical tile repeat")
+        if let original {
+          require(bytes != original, "warm tone differs from original")
+          require(
+            stride(from: 3, to: 4096, by: 4).allSatisfy { bytes[$0] == original[$0] },
+            "AppKit draw preserves original alpha")
+        } else {
+          original = bytes
+        }
+        if intensity == 20 || texture.id == "ClassicMatte" {
+          try writeToneComposite(normal.makeImage()!, texture.id, intensity, tone, evidence)
+        }
+      }
+    }
+  }
+  print("PASS: three tones preserve physical pixels, tile repeat and alpha through AppKit")
+}
+
+@MainActor
+func writeToneComposite(
+  _ tiled: CGImage, _ texture: String, _ strength: Int, _ tone: PaperTone, _ evidence: URL
+) throws {
+  let width = 512
+  let height = 160
+  let space = CGColorSpace(name: CGColorSpace.sRGB)!
+  let rect = CGRect(x: 0, y: 0, width: width, height: height)
+  let overlay = tiled.cropping(to: rect)!
+  for (surface, gray, ink) in [("light", 0.96, 0.19), ("dark", 0.11, 0.78)] {
+    let context = CGContext(
+      data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+      space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    context.setFillColor(CGColor(srgbRed: gray, green: gray, blue: gray, alpha: 1))
+    context.fill(rect)
+    context.setFillColor(CGColor(srgbRed: ink, green: ink, blue: ink, alpha: 1))
+    context.fill(CGRect(x: 32, y: 118, width: 126, height: 11))
+    for (index, length) in [264, 232, 252, 160].enumerated() {
+      context.fill(CGRect(x: 32, y: 93 - 18 * index, width: length, height: 3))
+    }
+    context.draw(overlay, in: rect)
+    let bitmap = NSBitmapImageRep(cgImage: context.makeImage()!)
+    let name = "tone-\(texture)-\(strength)-\(tone.rawValue)-\(surface).png"
+    try bitmap.representation(using: .png, properties: [:])!.write(
+      to: evidence.appendingPathComponent(name))
+  }
+}
+
+@MainActor
+func toneMenuTests(resources: URL, scratch: URL) throws {
+  let directory = scratch.appendingPathComponent("tone-menu")
+  let controller = try AppController(settingsDirectory: directory, resources: resources)
+  controller.foregroundIdentityProvider = { nil }
+  var settings = Settings()
+  settings.enabled = false
+  settings.texture = "WhisperWeave"
+  settings.intensity = 17
+  settings.language = "zh-Hans"
+  try settings.save(to: controller.settingsURL)
+  try controller.start(presentUI: false)
+  defer { controller.shutdown() }
+
+  let menu = NSMenu()
+  func choices(_ controller: AppController, _ title: String) -> NSMenu {
+    controller.populateMenu(menu, foreground: nil)
+    return menu.item(withTitle: title)!.submenu!
+  }
+  let original = controller.intensityImages[17]!
+  let initial = choices(controller, "色调")
+  require(initial.items.map(\.title) == ["原色", "浅暖", "暖纸"], "Chinese native tone choices")
+  require(initial.items.map(\.state) == [.on, .off, .off], "original starts checked")
+  initial.performActionForItem(at: 1)
+  settings.tone = .lightWarm
+  let light = controller.intensityImages[17]!
+  require(controller.settings == settings && light !== original, "native action applies light warm")
+  require(choices(controller, "色调").items.map(\.state) == [.off, .on, .off], "light warm checked")
+
+  let fm = FileManager.default
+  let backup = directory.appendingPathComponent("backup.json")
+  try fm.moveItem(at: controller.settingsURL, to: backup)
+  try fm.createDirectory(at: controller.settingsURL, withIntermediateDirectories: false)
+  choices(controller, "色调").performActionForItem(at: 2)
+  require(
+    controller.lastError == .saveFailed && controller.settings == settings
+      && controller.intensityImages[17] === light,
+    "failed tone save preserves the applied tone and slider images")
+  require(
+    choices(controller, "色调").items.map(\.state) == [.off, .on, .off], "failed save keeps check")
+  let diskBeforeRetry = try Settings.load(from: backup)
+  require(diskBeforeRetry == settings, "failed tone save preserves disk settings")
+  try fm.removeItem(at: controller.settingsURL)
+  try fm.moveItem(at: backup, to: controller.settingsURL)
+  choices(controller, "色调").performActionForItem(at: 2)
+  settings.tone = .warmPaper
+  require(controller.lastError == nil && controller.settings == settings, "tone save retries")
+  let warm = controller.intensityImages[17]!.dataProvider!.data! as Data
+  controller.shutdown()
+
+  let restarted = try AppController(settingsDirectory: directory, resources: resources)
+  restarted.foregroundIdentityProvider = { nil }
+  try restarted.start(presentUI: false)
+  defer { restarted.shutdown() }
+  require(restarted.settings == settings, "startup restores the selected tone and other settings")
+  require(restarted.intensityImages[17]!.dataProvider!.data! as Data == warm, "warm pixels reopen")
+  require(
+    choices(restarted, "色调").items.map(\.state) == [.off, .off, .on], "restarted tone is checked")
+  menu.item(withTitle: "语言")!.submenu!.performActionForItem(at: 1)
+  let english = choices(restarted, "Tone")
+  require(english.items.map(\.title) == ["Original", "Light Warm", "Warm Paper"], "English tones")
+  require(english.items.map(\.state) == [.off, .off, .on], "restarted tone is checked")
+  english.performActionForItem(at: 0)
+  require(
+    restarted.intensityImages[17]!.dataProvider!.data! as Data == original.dataProvider!.data!
+      as Data,
+    "selecting original restores the same pixels")
+  print("PASS: offscreen native tone menus, save failure rollback, retry and restart")
 }
 
 @MainActor
@@ -270,6 +543,12 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
   }
 
   func configureController(_ candidate: AppController) {
+    // Keep the real first-launch language entry offscreen for the lifecycle suite so it
+    // never steals focus or writes; its behavior is covered by exerciseLanguagePicker.
+    candidate.presentLanguageWindow = { window in
+      window.setFrameOrigin(NSPoint(x: -10000, y: -10000))
+      window.orderBack(nil)
+    }
     if skipForegroundTests {
       // Keep the real panel offscreen so paused foreground-switcher tests never steal focus.
       candidate.presentIntensityPanel = { panel, _ in
@@ -284,8 +563,278 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
   }
 
+  /// Behavioral coverage of the one-time first-launch language entry in its own settings
+  /// directories: fresh install, live re-localization, keyboard cancel, cancel writing
+  /// nothing, re-presentation after cancel, Return confirming a choice, menu still
+  /// switching afterwards, upgrade keeping the saved language, legacy files without a
+  /// language field following the system, the follow-system choice, and storage failure
+  /// with retry. Every window is hosted offscreen; nothing forces the foreground.
+  func exerciseLanguagePicker() throws {
+    let systemLanguage = AppLanguage.resolved(saved: nil)
+    let systemFollowTitle = systemLanguage == .zhHans ? "跟随系统" : "Follow system"
+    let systemEntryTitle = systemLanguage == .zhHans ? "选择语言" : "Choose Language"
+    func synthesize(_ candidate: AppController) {
+      candidate.presentLanguageWindow = { _ in }
+      candidate.screensProvider = { [] }
+      candidate.foregroundIdentityProvider = { "com.suepaper.synthetic.included" }
+    }
+    func controls(of window: NSWindow) -> (
+      follow: NSButton, chinese: NSButton, english: NSButton, ok: NSButton, cancel: NSButton,
+      fields: [NSTextField]
+    ) {
+      let views = viewTree(window.contentView!)
+      let buttons = views.compactMap { $0 as? NSButton }
+      let fields = views.compactMap { $0 as? NSTextField }
+      // The confirm button keeps "\r" only while its window is key; AppKit hands the
+      // Return key to the window's defaultButtonCell once the window is not key, so
+      // either identity identifies the same native control.
+      let ok =
+        buttons.first { $0.keyEquivalent == "\r" }
+        ?? buttons.first { $0.cell === window.defaultButtonCell }
+      let follow = buttons.first { $0.title == "跟随系统" || $0.title == "Follow system" }
+      let chinese = buttons.first { $0.title == "简体中文" }
+      let english = buttons.first { $0.title == "English" }
+      let cancel = buttons.first { $0.keyEquivalent == "\u{1b}" }
+      require(
+        follow != nil && chinese != nil && english != nil && ok != nil && cancel != nil,
+        "entry exposes its native radio, confirm and cancel controls")
+      return (follow!, chinese!, english!, ok!, cancel!, fields)
+    }
+    func keyboardEvent(_ keyCode: UInt16, _ characters: String, to window: NSWindow) -> NSEvent {
+      NSEvent.keyEvent(
+        with: .keyDown, location: .zero, modifierFlags: [],
+        timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: window.windowNumber, context: nil,
+        characters: characters, charactersIgnoringModifiers: characters,
+        isARepeat: false, keyCode: keyCode)!
+    }
+
+    let settingsDirectory = scratch.appendingPathComponent("language-picker")
+    try FileManager.default.createDirectory(
+      at: settingsDirectory, withIntermediateDirectories: true)
+    var controller = try AppController(settingsDirectory: settingsDirectory, resources: resources)
+    synthesize(controller)
+    try controller.start()
+    require(controller.firstLaunch, "fresh install counts as first launch")
+    require(
+      !FileManager.default.fileExists(atPath: controller.settingsURL.path),
+      "presenting the entry writes no settings")
+    var window = controller.languagePicker!.window!
+    require(!window.isVisible, "synthetic entry stays offscreen")
+    var controlsIn = controls(of: window)
+    require(
+      window.title == systemEntryTitle && controlsIn.follow.title == systemFollowTitle,
+      "the entry follows the system language before any choice")
+    require(
+      controlsIn.follow.state == .on && controlsIn.chinese.state == .off
+        && controlsIn.english.state == .off,
+      "follow system is preselected")
+    controlsIn.chinese.performClick(nil)
+    require(
+      window.title == "选择语言" && controlsIn.follow.title == "跟随系统",
+      "choosing Simplified Chinese re-localizes the entry immediately")
+    controlsIn.english.performClick(nil)
+    require(
+      window.title == "Choose Language" && controlsIn.follow.title == "Follow system",
+      "choosing English re-localizes the entry immediately")
+    controlsIn.follow.performClick(nil)
+    require(window.title == systemEntryTitle, "follow system returns to the system language")
+    // Escape routes to the cancel button and writes nothing.
+    require(
+      window.contentView!.performKeyEquivalent(with: keyboardEvent(53, "\u{1b}", to: window)),
+      "Escape is bound to cancel")
+    require(controller.languagePicker == nil, "Escape closes the entry")
+    require(
+      !FileManager.default.fileExists(atPath: controller.settingsURL.path),
+      "Escape cancels without writing settings")
+    controller.showFirstLaunchLanguage()
+    window = controller.languagePicker!.window!
+    controlsIn = controls(of: window)
+    controlsIn.cancel.performClick(nil)
+    require(controller.languagePicker == nil, "cancel closes the entry")
+    require(
+      !FileManager.default.fileExists(atPath: controller.settingsURL.path),
+      "cancel writes nothing")
+    require(controller.settings.language == nil, "cancel keeps following the system")
+
+    // A cancelled first launch stays a first launch on the next launch.
+    controller.shutdown()
+    controller = try AppController(settingsDirectory: settingsDirectory, resources: resources)
+    synthesize(controller)
+    try controller.start()
+    require(controller.firstLaunch, "a cancelled first launch stays a first launch")
+    window = controller.languagePicker!.window!
+    require(!window.isVisible, "the returning synthetic entry stays offscreen")
+    controlsIn = controls(of: window)
+    // Return confirms through the native default button; the click drives the same action.
+    controlsIn.english.performClick(nil)
+    require(
+      window.defaultButtonCell === controlsIn.ok.cell,
+      "OK is the default button, so Return confirms")
+    controlsIn.ok.performClick(nil)
+    require(controller.languagePicker == nil, "confirming closes the entry")
+    require(controller.settings.language == "en", "the first-launch choice applies immediately")
+    let saved = try Settings.load(from: controller.settingsURL)
+    require(saved.language == "en", "the first-launch choice persists to disk")
+    let menu = controller.statusItem!.menu!
+    controller.menuNeedsUpdate(menu)
+    require(menu.item(at: 0)?.title == "Enable paper texture", "menu localizes to the choice")
+    require(
+      controller.statusItem?.button?.accessibilityLabel() == "MattePulp",
+      "menu bar accessibility localizes to the choice")
+    let toneMenu = menu.items.compactMap(\.submenu).first {
+      $0.items.contains { $0.action == #selector(AppController.selectTone(_:)) }
+    }!
+    let warmPaperIndex = toneMenu.items.firstIndex {
+      ($0.representedObject as? String) == PaperTone.warmPaper.rawValue
+    }!
+    toneMenu.performActionForItem(at: warmPaperIndex)
+    controller.menuNeedsUpdate(menu)
+
+    // Each submenu has its own action, independent of its position.
+    let languageMenu = menu.items.compactMap(\.submenu).first {
+      $0.items.contains { $0.action == #selector(AppController.selectLanguage(_:)) }
+    }!
+    let chineseIndex = languageMenu.items.firstIndex {
+      ($0.representedObject as? String) == AppLanguage.zhHans.rawValue
+    }!
+    languageMenu.performActionForItem(at: chineseIndex)
+    controller.menuNeedsUpdate(menu)
+    require(
+      controller.settings.language == "zh-Hans" && menu.item(at: 0)?.title == "启用纸张纹理",
+      "the menu still switches language after the first-launch choice")
+    let combinedSettings = try Settings.load(from: controller.settingsURL)
+    require(
+      combinedSettings.tone == .warmPaper && combinedSettings.language == "zh-Hans",
+      "switching language preserves the chosen tone")
+
+    // Upgrade: an existing settings file never shows the entry and keeps the language.
+    controller.shutdown()
+    controller = try AppController(settingsDirectory: settingsDirectory, resources: resources)
+    synthesize(controller)
+    try controller.start()
+    require(!controller.firstLaunch, "an existing settings file ends the first-launch boundary")
+    require(controller.languagePicker == nil, "no entry for an existing user")
+    require(controller.settings.language == "zh-Hans", "upgrade keeps the saved language")
+    let upgradeMenu = controller.statusItem!.menu!
+    controller.menuNeedsUpdate(upgradeMenu)
+    require(
+      upgradeMenu.item(at: 0)?.title == "启用纸张纹理",
+      "menu stays on the saved language after upgrade")
+    controller.shutdown()
+
+    // Legacy settings without a language field keep following the system, without entry.
+    let legacyDirectory = scratch.appendingPathComponent("language-picker-legacy")
+    try FileManager.default.createDirectory(
+      at: legacyDirectory, withIntermediateDirectories: true)
+    let legacySettingsURL = legacyDirectory.appendingPathComponent("settings.json")
+    let legacyData = Data(
+      #"{"enabled":false,"intensity":15,"texture":"Parchment","exclusions":["com.example.legacy"]}"#
+        .utf8
+    )
+    try legacyData.write(to: legacySettingsURL)
+    let legacy = try AppController(settingsDirectory: legacyDirectory, resources: resources)
+    legacy.presentLanguageWindow = { _ in
+      require(false, "legacy settings without a language field never present the entry")
+    }
+    legacy.screensProvider = { [] }
+    legacy.foregroundIdentityProvider = { "com.suepaper.synthetic.included" }
+    try legacy.start()
+    require(
+      !legacy.firstLaunch && legacy.languagePicker == nil, "old settings never show the entry")
+    require(
+      !legacy.settings.enabled && legacy.settings.intensity == 15
+        && legacy.settings.texture == "Parchment"
+        && legacy.settings.exclusions == ["com.example.legacy"],
+      "legacy settings load unchanged")
+    require(legacy.settings.language == nil, "old settings keep following the system")
+    require(legacy.settings.tone == .original, "old settings use the original tone")
+    require(
+      !legacy.settings.schedule.timed && !legacy.settings.schedule.sunset,
+      "old settings leave both schedule rules disabled")
+    let legacyMenu = legacy.statusItem!.menu!
+    legacy.menuNeedsUpdate(legacyMenu)
+    require(
+      legacyMenu.item(at: 0)?.title == MenuText.resolved(saved: nil).toggle,
+      "legacy menu follows the system language")
+    legacy.shutdown()
+    let legacyAfterLaunch = try Data(contentsOf: legacySettingsURL)
+    require(legacyAfterLaunch == legacyData, "legacy startup does not rewrite settings")
+
+    // Following the system confirms without a language key but ends the entry.
+    let systemDirectory = scratch.appendingPathComponent("language-picker-system")
+    try FileManager.default.createDirectory(
+      at: systemDirectory, withIntermediateDirectories: true)
+    var follower = try AppController(settingsDirectory: systemDirectory, resources: resources)
+    synthesize(follower)
+    try follower.start()
+    require(
+      follower.firstLaunch && follower.languagePicker != nil,
+      "fresh follow-system install presents the entry")
+    controls(of: follower.languagePicker!.window!).ok.performClick(nil)
+    require(follower.languagePicker == nil, "confirming follow system closes the entry")
+    require(
+      FileManager.default.fileExists(atPath: follower.settingsURL.path),
+      "follow system persists the first-launch boundary")
+    let persistedText = try String(contentsOf: follower.settingsURL, encoding: .utf8)
+    require(!persistedText.contains("\"language\""), "follow system writes no language key")
+    require(follower.settings.language == nil, "follow system keeps following the system")
+    follower.shutdown()
+    follower = try AppController(settingsDirectory: systemDirectory, resources: resources)
+    synthesize(follower)
+    try follower.start()
+    require(
+      !follower.firstLaunch && follower.languagePicker == nil,
+      "the entry never returns after following the system")
+    require(follower.settings.language == nil, "follow system survives restart")
+    follower.shutdown()
+
+    // A failed save keeps the entry open with an inline retry; cancel still writes nothing.
+    let failingDirectory = scratch.appendingPathComponent("language-picker-failure")
+    try FileManager.default.createDirectory(
+      at: failingDirectory, withIntermediateDirectories: true)
+    let failing = try AppController(settingsDirectory: failingDirectory, resources: resources)
+    synthesize(failing)
+    try failing.start()
+    require(failing.languagePicker != nil, "failure install presents the entry")
+    // Replacing settings.json with a directory guarantees atomic save fails predictably.
+    try FileManager.default.createDirectory(
+      at: failing.settingsURL, withIntermediateDirectories: false)
+    var failingControls = controls(of: failing.languagePicker!.window!)
+    failingControls.chinese.performClick(nil)
+    failingControls.ok.performClick(nil)
+    require(failing.languagePicker != nil, "a failed save keeps the entry open")
+    require(failing.settings.language == nil, "a failed save applies no language")
+    require(
+      failingControls.fields.contains {
+        $0.stringValue.contains("保存失败") || $0.stringValue.contains("Could not save")
+      },
+      "a failed save shows the native retry message")
+    failingControls.cancel.performClick(nil)
+    require(failing.languagePicker == nil, "cancel closes after a failed save")
+    require(failing.settings.language == nil, "cancel after a failed save writes nothing")
+    try FileManager.default.removeItem(at: failing.settingsURL)
+    failing.showFirstLaunchLanguage()
+    require(failing.languagePicker != nil, "the entry returns after cancel")
+    failingControls = controls(of: failing.languagePicker!.window!)
+    failingControls.chinese.performClick(nil)
+    failingControls.ok.performClick(nil)
+    require(
+      failing.languagePicker == nil && failing.settings.language == "zh-Hans",
+      "retry after storage recovery persists")
+    let retried = try Settings.load(from: failing.settingsURL)
+    require(
+      retried.language == "zh-Hans" && failing.lastError == nil,
+      "retry persists to disk and clears the error")
+    failing.shutdown()
+    print(
+      "PASS: first-launch language entry (fresh install, live re-localization, Escape cancel, cancel writes nothing, re-presentation, Return confirm, menu switching, upgrade, legacy follow-system, follow-system choice, storage failure retry)"
+    )
+  }
+
   func applicationDidFinishLaunching(_ notification: Notification) {
     do {
+      try exerciseLanguagePicker()
       controller = try AppController(
         settingsDirectory: scratch.appendingPathComponent("lifecycle"), resources: resources)
       configureController(controller)
@@ -768,7 +1317,8 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     } catch { require(false, "menu persistence/lock: \(error)") }
     let menu = controller.statusItem!.menu!
     controller.menuNeedsUpdate(menu)
-    menu.item(at: 3)!.submenu!.performActionForItem(at: 1)
+    let language = MenuText.resolved(saved: controller.settings.language).languageMenu
+    menu.item(withTitle: language)!.submenu!.performActionForItem(at: 1)
     controller.menuNeedsUpdate(menu)
     require(controller.settings.language == "en", "English choice persisted")
     require(menu.item(at: 0)?.title == "Enable paper texture", "English menu refreshed")
@@ -781,7 +1331,7 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     require(
       controller.statusItem?.button?.accessibilityLabel() == "MattePulp",
       "English accessibility name")
-    menu.item(at: 3)!.submenu!.performActionForItem(at: 0)
+    menu.item(withTitle: "Language")!.submenu!.performActionForItem(at: 0)
     controller.menuNeedsUpdate(menu)
     require(menu.item(at: 0)?.title == "启用纸张纹理", "Chinese menu refreshed")
     require(menu.item(at: 1)?.submenu?.item(at: 2)?.title == "羊皮纸", "Chinese texture name")
@@ -1106,10 +1656,19 @@ struct Tests {
     let skipForeground =
       ProcessInfo.processInfo.environment["SUE_PAPER_SKIP_FOREGROUND_TESTS"] == "1"
     let app = NSApplication.shared
+    try loginItemTests(resources: resources, scratch: scratch)
     try settingsTests(scratch)
     try scheduleTests(fixture: URL(fileURLWithPath: CommandLine.arguments[4]), scratch: scratch)
     try textureTests(resources: resources, evidence: evidence)
-    if CommandLine.arguments.last == "--fixtures-only" { return }
+    try toneTextureTests(resources: resources, evidence: evidence)
+    try toneMenuTests(resources: resources, scratch: scratch)
+    try renderSyntheticLanguagePickerSnapshots(to: evidence)
+    if CommandLine.arguments.last == "--fixtures-only" {
+      app.setActivationPolicy(.prohibited)
+      let fixture = TestDelegate(resources: resources, scratch: scratch, skipForegroundTests: true)
+      try fixture.exerciseLanguagePicker()
+      return
+    }
     app.setActivationPolicy(skipForeground ? .prohibited : .regular)
     let delegate = TestDelegate(
       resources: resources, scratch: scratch, skipForegroundTests: skipForeground)

@@ -31,6 +31,8 @@ The texture covers every screen. The pointer and keyboard pass through it; it do
 
 Four textures come from fractal noise and tile without a seam. Texture ids match the published packages (table below); intensity uses a 15%-30% slider in 1% steps on macOS and 4 levels (15% / 20% / 25% / 30%) on Windows.
 
+In builds from this source, the Windows tray and Mac menu bar offer Original, Light Warm and Warm Paper under Tone. Original is the default. Every tone works with every texture and intensity, and the app remembers the chosen tone on restart.
+
 | Settings id | English menu | Chinese menu | Character |
 |---|---|---|---|
 | ClassicMatte | Classic Matte | 经典哑光 | Clean, soft grain for reading |
@@ -45,6 +47,12 @@ In a Windows build from this source, the Snooze menu adds "Resume now" while sno
 **Windows.** Unzip the stable package and run `sue-paper.exe`. When you build this source tree, right-click the tray icon: enable texture, texture/intensity/snooze, exclude the current app, language (中文 or English), and quit. The tray tip is 柔纸 in Chinese and MattePulp in English. Settings live in `%APPDATA%\Sue-Paper\settings.json`.
 
 **Mac.** The published image still has the mixed menu and four fixed intensity items. Build `Sue-Paper.app` from this source and click **S** in the menu bar for a one-language menu with a separate language item and a focusable intensity slider panel (15%-30%, 1% steps: drag previews live and saves on release; arrow keys and accessibility adjustments save on every step). Finder shows MattePulp; the executable remains `Sue-Paper`. Settings live in `~/Library/Application Support/Sue-Paper/settings.json`. The app asks for neither Accessibility nor Screen Recording permission.
+
+### Launch at login
+
+In a build from source, **Launch at login** starts unchecked for a new user. Click it in the Windows tray or macOS menu bar to register MattePulp for your account. Click the checked item to turn it off. A disabled or pending registration stays unchecked and can be removed with **Remove login item**.
+
+On Windows, extract the ZIP to a location where it can stay before enabling the option. Windows Task Scheduler starts that copy of `sue-paper.exe` at sign-in. If you move it, remove the old login item and enable it from the new copy. On macOS, the running app bundle is registered with the system. If the menu reports that approval is needed, check Login Items in System Settings.
 
 ### Schedule & Sunset
 

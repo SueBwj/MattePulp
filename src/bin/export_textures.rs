@@ -32,3 +32,36 @@ fn main() -> io::Result<()> {
         serde_json::to_vec_pretty(&catalog).map_err(io::Error::other)?,
     )
 }
+
+#[cfg(test)]
+#[test]
+fn warm_tones_are_distinct_and_preserve_alpha_at_every_texture_and_intensity() {
+    use sue_paper::tone::Tone;
+
+    for kind in KINDS {
+        for intensity in 15..=30 {
+            let original = generate_tile(kind, intensity);
+            let mut previous = i64::MIN;
+            for tone in Tone::ALL {
+                let mut tile = original.clone();
+                tone.apply(&mut tile);
+                let mut red_minus_blue = 0;
+                for ([b, g, r, a], base) in tile
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .zip(original.as_chunks::<4>().0)
+                {
+                    assert_eq!(*a, base[3]);
+                    assert!(b <= a && g <= a && r <= a);
+                    red_minus_blue += i64::from(*r) - i64::from(*b);
+                }
+                assert!(red_minus_blue > previous);
+                previous = red_minus_blue;
+                if tone == Tone::Original {
+                    assert_eq!(tile, original);
+                }
+            }
+        }
+    }
+}

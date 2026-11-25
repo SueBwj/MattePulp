@@ -17,12 +17,15 @@ cargo clippy --locked --manifest-path "$root/Cargo.toml" --lib --bin export_text
 xcrun swiftc -swift-version 6 -warnings-as-errors -target arm64-apple-macosx12.0 \
     -module-cache-path "$output/module-cache" -framework AppKit \
     -parse-as-library "$root/macos/ForegroundFixture.swift" -o "$scratch/foreground-fixture"
+xcrun clang -target arm64-apple-macosx12.0 -fobjc-arc -Wall -Wextra -Werror \
+    -c "$root/macos/LoginItemLegacy.m" -o "$scratch/login-item.o"
 xcrun swiftc -swift-version 6 -warnings-as-errors -target arm64-apple-macosx12.0 \
-    -module-cache-path "$output/module-cache" -framework AppKit \
-    -import-objc-header "$root/macos/ScheduleBridge.h" "$CARGO_TARGET_DIR/release/libsue_paper.a" \
+    -module-cache-path "$output/module-cache" -framework AppKit -framework CoreServices \
+    -import-objc-header "$root/macos/NativeBridge.h" "$CARGO_TARGET_DIR/release/libsue_paper.a" \
+    "$scratch/login-item.o" "$root/macos/LoginItem.swift" \
     "$root/macos/Schedule.swift" "$root/macos/ScheduleWindow.swift" \
     "$root/macos/Settings.swift" "$root/macos/Locale.swift" "$root/macos/Overlay.swift" \
-    "$root/macos/IntensitySlider.swift" \
+    "$root/macos/IntensitySlider.swift" "$root/macos/LanguagePicker.swift" \
     "$root/macos/AppController.swift" "$root/macos/Tests.swift" \
     -o "$scratch/tests"
 "$scratch/tests" "$output/Sue-Paper.app/Contents/Resources" "$scratch" "$output/test-results" \

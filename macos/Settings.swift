@@ -1,5 +1,11 @@
 import Foundation
 
+enum PaperTone: String, CaseIterable, Codable {
+  case original = "Original"
+  case lightWarm = "LightWarm"
+  case warmPaper = "WarmPaper"
+}
+
 struct Settings: Codable, Equatable {
   static let textures = ["ClassicMatte", "WhisperWeave", "Parchment", "VellumMist"]
   static let intensityRange = 15...30
@@ -7,6 +13,7 @@ struct Settings: Codable, Equatable {
   var enabled = true
   var texture = "ClassicMatte"
   var intensity = 20
+  var tone = PaperTone.original
   // Bundle identifiers, or executable URLs for apps without a bundle identifier.
   var exclusions: [String] = []
   /// Saved interface language. Nil follows the system UI language.
@@ -20,6 +27,7 @@ struct Settings: Codable, Equatable {
     enabled = try values.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
     texture = try values.decodeIfPresent(String.self, forKey: .texture) ?? "ClassicMatte"
     intensity = try values.decodeIfPresent(Int.self, forKey: .intensity) ?? Self.defaultIntensity
+    tone = (try? values.decode(PaperTone.self, forKey: .tone)) ?? .original
     exclusions = try values.decodeIfPresent([String].self, forKey: .exclusions) ?? []
     language = try values.decodeIfPresent(String.self, forKey: .language)
     schedule = (try? values.decode(ScheduleSettings.self, forKey: .schedule)) ?? ScheduleSettings()

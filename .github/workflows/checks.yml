@@ -27,4 +27,4 @@ jobs:
       - name: Build native Apple Silicon bundle
         run: ./build-macos.sh "$RUNNER_TEMP/sue-paper-build"
       - name: Shared texture and AppKit checks
-        run: ./test-macos.sh "$RUNNER_TEMP/sue-paper-build"
+        run: ./test-macos.sh "$RUNNER_TEMP/sue-paper-build" --fixtures-only

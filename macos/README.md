@@ -4,6 +4,8 @@ The Mac app is a Swift/AppKit menu bar process. `build-macos.sh` runs the existi
 
 ## Build and run
 
+The Tone menu saves an independent `tone` setting. The shared Rust color transform runs when macOS loads the selected texture and tone, keeping only that combination's 16 slider levels in memory and using the same 64 bundled base tiles. Files from older installs open in Original tone.
+
 See the [main README](../README.en.md#macos-apple-silicon) for build and launch instructions. Local execution evidence below is for macOS 26.4.1 only; Intel and universal binaries are not produced.
 
 `CARGO_TARGET_DIR` and `CLANG_MODULE_CACHE_PATH` can point to reusable build caches. The build applies only an ad-hoc integrity signature, verified with `codesign --verify --strict`. It does not use a signing identity, request certificates, notarize, publish, install to Applications, or add a login item. Downloaded copies may be blocked by Gatekeeper; this build does not bypass that protection. A distributable Developer ID/notarization process is separate work.
@@ -28,7 +30,7 @@ The panels request all Spaces and fullscreen auxiliary behavior, with `canJoinAl
 
 ## Validation and limits
 
-`test-macos.sh BUILD_OUTPUT_DIRECTORY` compiles production Swift sources into a behavioral test executable, runs Rust texture tests and lint, then starts and exits the actual packaged app. It keeps settings in a temporary directory. Its only saved images are generated white paper/text bars composited with the texture, under `BUILD_OUTPUT_DIRECTORY/test-results`; it never captures the desktop or other windows.
+`test-macos.sh BUILD_OUTPUT_DIRECTORY` compiles production Swift sources into a behavioral test executable, runs Rust texture tests and lint, then starts and exits the actual packaged app. It keeps settings in a temporary directory. `--fixtures-only` runs the offscreen checks, including the native tone menu actions and light and dark texture composites under `BUILD_OUTPUT_DIRECTORY/test-results`, without presenting the app or inspecting the desktop.
 
 Observed on an Apple Silicon Mac running macOS 26.4.1, Swift 6.3.3 and Rust 1.100.0:
 
