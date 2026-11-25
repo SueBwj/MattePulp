@@ -708,11 +708,12 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let legacyDirectory = scratch.appendingPathComponent("language-picker-legacy")
     try FileManager.default.createDirectory(
       at: legacyDirectory, withIntermediateDirectories: true)
-    try Data(
+    let legacySettingsURL = legacyDirectory.appendingPathComponent("settings.json")
+    let legacyData = Data(
       #"{"enabled":false,"intensity":15,"texture":"Parchment","exclusions":["com.example.legacy"]}"#
         .utf8
     )
-    .write(to: legacyDirectory.appendingPathComponent("settings.json"))
+    try legacyData.write(to: legacySettingsURL)
     let legacy = try AppController(settingsDirectory: legacyDirectory, resources: resources)
     legacy.presentLanguageWindow = { _ in
       require(false, "legacy settings without a language field never present the entry")
@@ -728,12 +729,18 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         && legacy.settings.exclusions == ["com.example.legacy"],
       "legacy settings load unchanged")
     require(legacy.settings.language == nil, "old settings keep following the system")
+    require(legacy.settings.tone == .original, "old settings use the original tone")
+    require(
+      !legacy.settings.schedule.timed && !legacy.settings.schedule.sunset,
+      "old settings leave both schedule rules disabled")
     let legacyMenu = legacy.statusItem!.menu!
     legacy.menuNeedsUpdate(legacyMenu)
     require(
       legacyMenu.item(at: 0)?.title == MenuText.resolved(saved: nil).toggle,
       "legacy menu follows the system language")
     legacy.shutdown()
+    let legacyAfterLaunch = try Data(contentsOf: legacySettingsURL)
+    require(legacyAfterLaunch == legacyData, "legacy startup does not rewrite settings")
 
     // Following the system confirms without a language key but ends the entry.
     let systemDirectory = scratch.appendingPathComponent("language-picker-system")
