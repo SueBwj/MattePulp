@@ -1,0 +1,98 @@
+name: Windows package
+
+on:
+  workflow_dispatch:
+    inputs:
+      product_sha:
+        description: Product source commit
+        required: true
+        type: choice
+        options:
+          - 2d6881819049f0333db4f14ffd59c565db34e66f
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-2022
+    steps:
+      - name: Check dispatch context
+        shell: pwsh
+        env:
+          PRODUCT_SHA: ${{ inputs.product_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_REPOSITORY -cne 'SueBwj/MattePulp' -or
+              $env:GITHUB_REF -cne 'refs/heads/main' -or
+              $env:PRODUCT_SHA -cne '2d6881819049f0333db4f14ffd59c565db34e66f' -or
+              $env:RUNNER_ARCH -cne 'X64') {
+            throw 'Unexpected repository, branch, product SHA, or runner architecture'
+          }
+          Write-Host "Workflow SHA: $env:GITHUB_WORKFLOW_SHA"
+
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: 2d6881819049f0333db4f14ffd59c565db34e66f
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify source and build package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = '2d6881819049f0333db4f14ffd59c565db34e66f'
+          $tree = '0e0c2e70d591de6f7c2764d94364ce0cc157ccb9'
+          $head = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $head -cne $source) { throw 'Unexpected source HEAD' }
+          $actualTree = (git rev-parse 'HEAD^{tree}').Trim()
+          if ($LASTEXITCODE -ne 0 -or $actualTree -cne $tree) { throw 'Unexpected source tree' }
+          git merge-base --is-ancestor $source refs/remotes/origin/main
+          if ($LASTEXITCODE -ne 0) { throw 'Source is not on main' }
+          Write-Host "Product SHA: $head"
+          Write-Host "Product tree: $actualTree"
+          Write-Host "Workflow SHA: $env:GITHUB_WORKFLOW_SHA"
+
+          ./build-release.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Native build failed' }
+          $exe = Join-Path $PWD 'target/release/sue-paper.exe'
+          $license = Join-Path $PWD 'LICENSE'
+          $bytes = [IO.File]::ReadAllBytes($exe)
+          if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x4d -or $bytes[1] -ne 0x5a) { throw 'Invalid DOS header' }
+          $offset = [BitConverter]::ToInt32($bytes, 0x3c)
+          if ($offset -lt 0 -or $offset -gt ($bytes.Length - 6) -or
+              [BitConverter]::ToUInt32($bytes, $offset) -ne 0x00004550 -or
+              [BitConverter]::ToUInt16($bytes, $offset + 4) -ne 0x8664) { throw 'Executable is not PE x64' }
+
+          $output = Join-Path $env:RUNNER_TEMP 'mattepulp-package'
+          New-Item -ItemType Directory -Path $output -Force | Out-Null
+          $zip = Join-Path $output 'MattePulp-v0.2.0-windows-x64.zip'
+          Compress-Archive -LiteralPath $exe, $license -DestinationPath $zip
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            $names = @($archive.Entries | ForEach-Object { $_.FullName } | Sort-Object)
+            if ($names.Count -ne 2 -or $names[0] -cne 'LICENSE' -or $names[1] -cne 'sue-paper.exe') { throw 'Unexpected ZIP entries' }
+            $entry = $archive.GetEntry('LICENSE')
+            $stream = $entry.Open()
+            try {
+              $hash = [Security.Cryptography.SHA256]::Create()
+              try { $zipLicenseHash = [BitConverter]::ToString($hash.ComputeHash($stream)).Replace('-', '') }
+              finally { $hash.Dispose() }
+            } finally { $stream.Dispose() }
+            if ($zipLicenseHash -cne (Get-FileHash -Algorithm SHA256 -LiteralPath $license).Hash) { throw 'ZIP license differs from source' }
+          } finally { $archive.Dispose() }
+          $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLowerInvariant()
+          $sidecar = "$zip.sha256"
+          [IO.File]::WriteAllText($sidecar, "$digest  $([IO.Path]::GetFileName($zip))`n", [Text.Encoding]::ASCII)
+          Write-Host "ZIP: $zip"
+          Write-Host "SHA-256: $digest"
+          Write-Host "Checksum: $sidecar"
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: MattePulp-v0.2.0-windows-x64-source-2d6881819049f0333db4f14ffd59c565db34e66f-workflow-${{ github.workflow_sha }}
+          path: |
+            ${{ runner.temp }}/mattepulp-package/MattePulp-v0.2.0-windows-x64.zip
+            ${{ runner.temp }}/mattepulp-package/MattePulp-v0.2.0-windows-x64.zip.sha256
+          if-no-files-found: error
