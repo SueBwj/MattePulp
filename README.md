@@ -1,18 +1,30 @@
-# MattePulp
+<h1 align="center">MattePulp</h1>
 
-**中文** | [English](README.en.md)
+<p align="center"><b>中文</b> | <a href="README.en.md">English</a></p>
 
-<p align="center">
-  <img src="assets/app-icon.png" width="128" alt="MattePulp 图标：深蓝底上两张交叠的半透明纸">
-</p>
+<p align="center"><img src="assets/app-icon.png" width="120" alt="MattePulp 图标：深蓝底上两张交叠的半透明纸"></p>
 
-**MattePulp（柔纸）在屏幕上铺一层生成的纸纹，让发亮的显示看起来像一张哑光纸。**
+<p align="center"><b>让屏幕的光，柔和一点。</b><br>MattePulp（柔纸）在屏幕上铺一层生成的纸纹，让发亮的显示看起来像一张哑光纸。</p>
 
-<p align="center">
-  <img src="assets/showcase1.png" width="32%" alt="纸纹盖在阅读页面上">
-  <img src="assets/showcase2.png" width="32%" alt="同一阅读页面上有一段高亮选区，纸纹不变">
-  <img src="assets/showcase3.png" width="32%" alt="阅读视图翻到后一页，纸纹仍覆盖整屏">
-</p>
+<p align="center"><a href="#下载">下载</a> · <a href="#使用">使用</a> · <a href="#构建与测试">构建与测试</a></p>
+
+![合成阅读场景的原屏与经典哑光纸纹对比](showcase/reading-comparison.png)
+
+<sub>合成阅读场景，右侧叠加源码生成的经典哑光纹理：原色，20% 强度。</sub>
+
+## 找到你的纸感
+
+四种纹理与三种色调可以自由组合。下图是源码生成的合成样本，强度均为 20%；色调功能在源码构建中提供。
+
+![四种纹理各搭配原色、浅暖和暖纸的矩阵](showcase/texture-tones.png)
+
+| 安静覆盖 | 自由穿透 |
+|---|---|
+| 纸纹覆盖屏幕，生成的纹理可无缝平铺。 | 鼠标和键盘直接穿过，不抢焦点。 |
+| **四种纹理** | **三种色调** |
+| 经典哑光、织物纹理、羊皮纸、薄纱雾面。 | 原色、浅暖、暖纸可与任意纹理搭配（源码构建）。 |
+| **调节强度** | **按需出现** |
+| Windows 四档，源码构建的 macOS 为 15%-30% 滑杆。 | 打盹、应用排除，以及源码构建中的定时与日落。 |
 
 ## 下载
 
@@ -23,13 +35,18 @@
 | Windows x64 | [v0.1.0](https://github.com/SueBwj/MattePulp/releases/tag/v0.1.0) 稳定版 | [sue-paper-v0.1.0-windows-x64.zip](https://github.com/SueBwj/MattePulp/releases/download/v0.1.0/sue-paper-v0.1.0-windows-x64.zip) |
 | Mac Apple Silicon | [v0.1.1-macos.1](https://github.com/SueBwj/MattePulp/releases/tag/v0.1.1-macos.1) 预发布 | [Sue-Paper-macOS-arm64-local-d9fb2c7.dmg](https://github.com/SueBwj/MattePulp/releases/download/v0.1.1-macos.1/Sue-Paper-macOS-arm64-local-d9fb2c7.dmg) |
 
+<details>
+<summary>已发布版本与当前源码的区别</summary>
+
 Windows v0.1.0（`53b266a`）仍是旧托盘图标和单一界面，没有语言菜单。Mac 预发布（`d9fb2c7`，仅 Apple Silicon）已用当前半透明纸图标，但菜单仍是中英混排、无单独语言项；镜像只做 ad-hoc 签名、未公证，从网络下载时 Gatekeeper 可能拦截。旧版 `settings.json` 没有 `language` 字段也能继续用。
+
+</details>
 
 ## 使用
 
 纸纹盖住每块屏幕，鼠标和键盘直接穿过，不拿焦点，也不出现在窗口切换里。Mac 的显示范围见 [Mac 说明](macos/README.md#display-behavior)。
 
-四种纹理由分形噪声生成，可无缝平铺，纹理编号与已发布包一致（见下表）；强度在 macOS 上为 15%-30% 滑杆（1% 步进），在 Windows 上为 15% / 20% / 25% / 30% 四档。
+四种纹理由分形噪声生成，可无缝平铺，纹理编号与已发布包一致（见下表）；从源码构建时，强度在 macOS 上为 15%-30% 滑杆（1% 步进），在 Windows 上为 15% / 20% / 25% / 30% 四档。
 
 从源码构建的 Windows 托盘和 Mac 菜单栏都可在「色调」中选择「原色」「浅暖」「暖纸」。原色是默认值，暖色调可搭配任意纹理与强度，选择会在重启后恢复。
 
@@ -46,7 +63,7 @@ Windows v0.1.0（`53b266a`）仍是旧托盘图标和单一界面，没有语言
 
 **Windows。** 解压稳定包后运行 `sue-paper.exe`。从源码运行时右键托盘图标：启用纹理、纹理/强度/打盹、排除当前应用、语言（中文或 English）、退出。托盘提示在中文下是「柔纸」，英文下是 MattePulp。设置文件在 `%APPDATA%\Sue-Paper\settings.json`。
 
-**Mac。** 已发布镜像仍是混排菜单与四档固定强度。从源码构建 `Sue-Paper.app` 后点菜单栏 **S**：整份菜单只用一种语言，可单独选语言，并可通过「强度 - N%」弹出可聚焦的原生滑杆面板（15%-30%，1% 步进；拖动实时预览、松开保存，键盘方向键与辅助功能调节每次即保存）。Finder 显示名是 MattePulp，可执行文件仍是 `Sue-Paper`；设置在 `~/Library/Application Support/Sue-Paper/settings.json`。不需要辅助功能或屏幕录制权限。
+**Mac。** 打开已发布的镜像，启动其中的应用。已发布镜像仍是混排菜单与四档固定强度。从源码构建 `Sue-Paper.app` 后点菜单栏 **S**：整份菜单只用一种语言，可单独选语言，并可通过「强度 - N%」弹出可聚焦的原生滑杆面板（15%-30%，1% 步进；拖动实时预览、松开保存，键盘方向键与辅助功能调节每次即保存）。Finder 显示名是 MattePulp，可执行文件仍是 `Sue-Paper`；设置在 `~/Library/Application Support/Sue-Paper/settings.json`。不需要辅助功能或屏幕录制权限。
 
 ### 登录时启动
 

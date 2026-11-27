@@ -1,18 +1,30 @@
-# MattePulp
+<h1 align="center">MattePulp</h1>
 
-[中文](README.md) | **English**
+<p align="center"><a href="README.md">中文</a> | <b>English</b></p>
 
-<p align="center">
-  <img src="assets/app-icon.png" width="128" alt="MattePulp icon: two overlapping translucent sheets on a dark blue field">
-</p>
+<p align="center"><img src="assets/app-icon.png" width="120" alt="MattePulp icon: two overlapping translucent sheets on a dark blue field"></p>
 
-**MattePulp covers the screen with a generated paper texture so a bright display reads like matte paper.**
+<p align="center"><b>A softer light for your screen.</b><br>MattePulp covers the screen with a generated paper texture so a bright display reads like matte paper.</p>
 
-<p align="center">
-  <img src="assets/showcase1.png" width="32%" alt="Paper grain over a reading page">
-  <img src="assets/showcase2.png" width="32%" alt="The same reading page with a highlighted passage under the grain">
-  <img src="assets/showcase3.png" width="32%" alt="A later page in the same reading view, still under the grain">
-</p>
+<p align="center"><a href="#download">Download</a> · <a href="#usage">Usage</a> · <a href="#build-and-test">Build and test</a></p>
+
+![Before and after Classic Matte on a synthetic reading scene](showcase/reading-comparison.png)
+
+<sub>Synthetic reading scene with the source-generated Classic Matte texture on the right: Original tone, 20% intensity.</sub>
+
+## Find your paper
+
+Combine any of the four textures with any of the three tones. These synthetic samples are generated from source at 20% intensity; tones are available in source builds.
+
+![Matrix of four textures in Original, Light Warm and Warm Paper tones](showcase/texture-tones.png)
+
+| Quiet coverage | Click through |
+|---|---|
+| Generated paper texture covers the screen and tiles seamlessly. | Pointer and keyboard pass through without taking focus. |
+| **Four textures** | **Three tones** |
+| Classic Matte, Whisper Weave, Sunbaked Parchment and Vellum Mist. | Original, Light Warm and Warm Paper work with any texture in source builds. |
+| **Adjust intensity** | **There when needed** |
+| Four levels on Windows; a 15%-30% slider in macOS source builds. | Snooze and app exclusion, plus Schedule & Sunset in source builds. |
 
 ## Download
 
@@ -23,13 +35,18 @@ Download a published package first. The bilingual menus in this source tree are 
 | Windows x64 | [v0.1.0](https://github.com/SueBwj/MattePulp/releases/tag/v0.1.0) stable | [sue-paper-v0.1.0-windows-x64.zip](https://github.com/SueBwj/MattePulp/releases/download/v0.1.0/sue-paper-v0.1.0-windows-x64.zip) |
 | Mac Apple Silicon | [v0.1.1-macos.1](https://github.com/SueBwj/MattePulp/releases/tag/v0.1.1-macos.1) prerelease | [Sue-Paper-macOS-arm64-local-d9fb2c7.dmg](https://github.com/SueBwj/MattePulp/releases/download/v0.1.1-macos.1/Sue-Paper-macOS-arm64-local-d9fb2c7.dmg) |
 
+<details>
+<summary>Published packages and current source</summary>
+
 Windows v0.1.0 (`53b266a`) still has the older tray art and a single-language UI with no language menu. The Mac prerelease (`d9fb2c7`, Apple Silicon only) already uses the current translucent paper icon, but menus stay mixed Chinese/English with no separate language item. The disk image is ad-hoc signed and not notarized; Gatekeeper may block a network download. Older `settings.json` files without a `language` field still load.
+
+</details>
 
 ## Usage
 
 The texture covers every screen. The pointer and keyboard pass through it; it does not take focus or appear in window switching. Mac display limits are in the [Mac notes](macos/README.md#display-behavior).
 
-Four textures come from fractal noise and tile without a seam. Texture ids match the published packages (table below); intensity uses a 15%-30% slider in 1% steps on macOS and 4 levels (15% / 20% / 25% / 30%) on Windows.
+Four textures come from fractal noise and tile without a seam. Texture ids match the published packages (table below); in source builds, intensity uses a 15%-30% slider in 1% steps on macOS and 4 levels (15% / 20% / 25% / 30%) on Windows.
 
 In builds from this source, the Windows tray and Mac menu bar offer Original, Light Warm and Warm Paper under Tone. Original is the default. Every tone works with every texture and intensity, and the app remembers the chosen tone on restart.
 
@@ -46,7 +63,7 @@ In a Windows build from this source, the Snooze menu adds "Resume now" while sno
 
 **Windows.** Unzip the stable package and run `sue-paper.exe`. When you build this source tree, right-click the tray icon: enable texture, texture/intensity/snooze, exclude the current app, language (中文 or English), and quit. The tray tip is 柔纸 in Chinese and MattePulp in English. Settings live in `%APPDATA%\Sue-Paper\settings.json`.
 
-**Mac.** The published image still has the mixed menu and four fixed intensity items. Build `Sue-Paper.app` from this source and click **S** in the menu bar for a one-language menu with a separate language item and a focusable intensity slider panel (15%-30%, 1% steps: drag previews live and saves on release; arrow keys and accessibility adjustments save on every step). Finder shows MattePulp; the executable remains `Sue-Paper`. Settings live in `~/Library/Application Support/Sue-Paper/settings.json`. The app asks for neither Accessibility nor Screen Recording permission.
+**Mac.** Open the published disk image and launch the app inside. The published image still has the mixed menu and four fixed intensity items. Build `Sue-Paper.app` from this source and click **S** in the menu bar for a one-language menu with a separate language item and a focusable intensity slider panel (15%-30%, 1% steps: drag previews live and saves on release; arrow keys and accessibility adjustments save on every step). Finder shows MattePulp; the executable remains `Sue-Paper`. Settings live in `~/Library/Application Support/Sue-Paper/settings.json`. The app asks for neither Accessibility nor Screen Recording permission.
 
 ### Launch at login
 
