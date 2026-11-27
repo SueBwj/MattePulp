@@ -15,7 +15,6 @@ use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use crate::monitor;
 use crate::texture::TILE;
 
 const CLASS_NAME: windows::core::PCWSTR = w!("SuePaperOverlay");
@@ -53,9 +52,9 @@ pub unsafe fn register_class(hinst: HINSTANCE) -> windows::core::Result<()> {
 }
 
 /// 为每个显示器创建一个覆盖窗口
-pub unsafe fn spawn_all(hinst: HINSTANCE) -> windows::core::Result<Vec<Overlay>> {
+pub unsafe fn spawn_all(hinst: HINSTANCE, rects: &[RECT]) -> windows::core::Result<Vec<Overlay>> {
     let mut out = Vec::new();
-    for rect in monitor::monitor_rects()? {
+    for &rect in rects {
         let ex_style =
             WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
         match CreateWindowExW(

@@ -19,6 +19,8 @@ struct Settings: Codable, Equatable {
   /// Saved interface language. Nil follows the system UI language.
   var language: String?
   var schedule = ScheduleSettings()
+  var displayMode = "all"
+  var selectedDisplays: [String: String] = [:]
 
   init() {}
 
@@ -31,10 +33,15 @@ struct Settings: Codable, Equatable {
     exclusions = try values.decodeIfPresent([String].self, forKey: .exclusions) ?? []
     language = try values.decodeIfPresent(String.self, forKey: .language)
     schedule = (try? values.decode(ScheduleSettings.self, forKey: .schedule)) ?? ScheduleSettings()
+    displayMode =
+      (try? values.decode(String.self, forKey: .displayMode)) == "selected" ? "selected" : "all"
+    selectedDisplays = (try? values.decode([String: String].self, forKey: .selectedDisplays)) ?? [:]
     normalize()
   }
 
   mutating func normalize() {
+    if displayMode != "selected" { displayMode = "all" }
+    selectedDisplays = selectedDisplays.filter { !$0.key.isEmpty && !$0.value.isEmpty }
     if !Self.textures.contains(texture) { texture = "ClassicMatte" }
     if !Self.intensityRange.contains(intensity) { intensity = Self.defaultIntensity }
     if let language, AppLanguage(rawValue: language) == nil { self.language = nil }
@@ -44,6 +51,15 @@ struct Settings: Codable, Equatable {
           $0.trimmingCharacters(in: .whitespacesAndNewlines)
         }.filter { !$0.isEmpty })
     ).sorted()
+  }
+
+  func coversDisplay(at index: Int, identities: [String?]) -> Bool {
+    guard identities.indices.contains(index) else { return false }
+    if displayMode == "all" { return true }
+    guard let id = identities[index], identities.filter({ $0 == id }).count == 1 else {
+      return false
+    }
+    return selectedDisplays[id] != nil
   }
 
   static func load(from url: URL) throws -> Settings {

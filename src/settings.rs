@@ -1,5 +1,6 @@
 //! 设置持久化：%APPDATA%/Sue-Paper/settings.json
 
+use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::os::windows::ffi::OsStrExt;
@@ -32,6 +33,8 @@ pub struct Settings {
     )]
     pub language: Option<Language>,
     pub schedule: ScheduleSettings,
+    pub display_mode: String,
+    pub selected_displays: BTreeMap<String, String>,
 }
 
 impl<'de> Deserialize<'de> for Settings {
@@ -75,6 +78,16 @@ impl<'de> Deserialize<'de> for Settings {
         if let Some(value) = fields.get("schedule") {
             settings.schedule = ScheduleSettings::from_document(value);
         }
+        settings.display_mode = fields
+            .get("display_mode")
+            .and_then(|v| v.as_str())
+            .filter(|v| *v == "selected")
+            .unwrap_or("all")
+            .to_string();
+        settings.selected_displays = fields
+            .get("selected_displays")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
         Ok(settings)
     }
 }
@@ -89,6 +102,8 @@ impl Default for Settings {
             exclusions: Vec::new(),
             language: None,
             schedule: ScheduleSettings::default(),
+            display_mode: "all".into(),
+            selected_displays: BTreeMap::new(),
         }
     }
 }
@@ -138,8 +153,34 @@ impl Settings {
         }
     }
 
+    pub fn covers_display(&self, id: Option<&str>) -> bool {
+        self.display_mode == "all" || id.is_some_and(|id| self.selected_displays.contains_key(id))
+    }
+
     pub fn save(&self) -> io::Result<()> {
         save_to_path(&settings_path(), self)
+    }
+
+    pub fn change_displays(
+        &mut self,
+        mode: String,
+        selected: BTreeMap<String, String>,
+    ) -> io::Result<()> {
+        self.change_displays_at(mode, selected, &settings_path())
+    }
+
+    fn change_displays_at(
+        &mut self,
+        mode: String,
+        selected: BTreeMap<String, String>,
+        path: &Path,
+    ) -> io::Result<()> {
+        let mut updated = self.clone();
+        updated.display_mode = mode;
+        updated.selected_displays = selected;
+        save_to_path(path, &updated)?;
+        *self = updated;
+        Ok(())
     }
 
     pub fn change_tone(&mut self, tone: Tone) -> io::Result<bool> {
@@ -158,6 +199,11 @@ impl Settings {
     }
 
     fn normalized(mut self) -> Self {
+        if self.display_mode != "selected" {
+            self.display_mode = "all".into();
+        }
+        self.selected_displays
+            .retain(|id, label| !id.is_empty() && !label.is_empty());
         if !matches!(self.intensity, 15 | 20 | 25 | 30) {
             self.intensity = Self::default().intensity;
         }
@@ -226,6 +272,54 @@ fn save_to_path(path: &Path, settings: &Settings) -> io::Result<()> {
 mod tests {
     use super::*;
     use crate::locale::Language;
+
+    #[test]
+    fn display_save_failure_keeps_previous_membership() {
+        let dir =
+            std::env::temp_dir().join(format!("mattepulp-display-test-{}", std::process::id()));
+        let path = dir.join("settings.json");
+        let backup = dir.join("backup.json");
+        let mut settings = Settings::default();
+        let mut chosen = BTreeMap::new();
+        chosen.insert("one".into(), "Display".into());
+        settings
+            .change_displays_at("selected".into(), chosen.clone(), &path)
+            .unwrap();
+        std::fs::rename(&path, &backup).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(settings
+            .change_displays_at("all".into(), BTreeMap::new(), &path)
+            .is_err());
+        assert_eq!(settings.display_mode, "selected");
+        assert_eq!(settings.selected_displays, chosen);
+        let disk: Settings = serde_json::from_slice(&std::fs::read(&backup).unwrap()).unwrap();
+        assert_eq!(settings, disk);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn display_selection_survives_disconnect_and_bad_fields() {
+        let old: Settings = serde_json::from_str(r#"{"enabled":false}"#).unwrap();
+        assert!(old.covers_display(None));
+        let mut selected = old.clone();
+        selected.display_mode = "selected".into();
+        selected
+            .selected_displays
+            .insert("a".into(), "Same name".into());
+        selected
+            .selected_displays
+            .insert("b".into(), "Same name".into());
+        assert!(selected.covers_display(Some("a")) && selected.covers_display(Some("b")));
+        assert!(!selected.covers_display(None) && !selected.covers_display(Some("other")));
+        let restored: Settings =
+            serde_json::from_str(&serde_json::to_string(&selected).unwrap()).unwrap();
+        assert_eq!(restored, selected);
+        assert!(restored.covers_display(Some("a")));
+        let bad: Settings =
+            serde_json::from_str(r#"{"enabled":false,"display_mode":{},"selected_displays":[]}"#)
+                .unwrap();
+        assert!(!bad.enabled && bad.covers_display(None) && bad.selected_displays.is_empty());
+    }
 
     #[test]
     fn missing_fields_use_defaults() {

@@ -1,5 +1,37 @@
 import AppKit
 
+@MainActor
+func displaySelectionTests() throws {
+  var settings = Settings()
+  let devices: [String?] = ["uuid-a", "uuid-b", nil]
+  require(
+    devices.indices.allSatisfy { settings.coversDisplay(at: $0, identities: devices) },
+    "legacy all covers every live display")
+  settings.displayMode = "selected"
+  settings.selectedDisplays = ["uuid-a": "Same name", "uuid-b": "Same name"]
+  require(
+    settings.coversDisplay(at: 0, identities: devices)
+      && settings.coversDisplay(at: 1, identities: devices), "same labels remain distinct")
+  require(
+    !settings.coversDisplay(at: 2, identities: devices), "unidentified display is not selected")
+  require(
+    !settings.coversDisplay(at: 0, identities: ["uuid-a", "uuid-a"]),
+    "ambiguous identity is never selected")
+  require(
+    !settings.coversDisplay(at: 0, identities: ["other"]),
+    "disconnect preserves membership without covering another display")
+  require(
+    settings.coversDisplay(at: 0, identities: ["uuid-a"]), "identity reconnect restores selection")
+  let roundTrip = try JSONDecoder().decode(Settings.self, from: JSONEncoder().encode(settings))
+  require(roundTrip == settings, "display selection survives settings round trip")
+  let malformed = try JSONDecoder().decode(
+    Settings.self, from: Data("{\"enabled\":false,\"displayMode\":{},\"selectedDisplays\":[]}".utf8)
+  )
+  require(
+    !malformed.enabled && malformed.displayMode == "all" && malformed.selectedDisplays.isEmpty,
+    "malformed display fields preserve other settings")
+}
+
 func hasASCIILetter(_ text: String) -> Bool {
   text.contains { $0.isASCII && $0.isLetter }
 }
@@ -401,6 +433,47 @@ func writeToneComposite(
     try bitmap.representation(using: .png, properties: [:])!.write(
       to: evidence.appendingPathComponent(name))
   }
+}
+
+@MainActor
+func displayMenuTests(resources: URL, scratch: URL) throws {
+  let directory = scratch.appendingPathComponent("display-menu")
+  let controller = try AppController(settingsDirectory: directory, resources: resources)
+  controller.screensProvider = { [] }
+  controller.foregroundIdentityProvider = { nil }
+  var original = Settings()
+  original.language = "en"
+  original.enabled = false
+  try original.save(to: controller.settingsURL)
+  try controller.start(presentUI: false)
+  defer { controller.shutdown() }
+  let menu = NSMenu()
+  func displays() -> NSMenu {
+    controller.populateMenu(menu, foreground: nil)
+    return menu.item(withTitle: "Displays")!.submenu!
+  }
+  let fm = FileManager.default
+  let backup = directory.appendingPathComponent("backup.json")
+  try fm.moveItem(at: controller.settingsURL, to: backup)
+  try fm.createDirectory(at: controller.settingsURL, withIntermediateDirectories: false)
+  displays().performActionForItem(at: 1)
+  require(
+    controller.settings == original && controller.lastError == .saveFailed,
+    "failed display mode save leaves applied state unchanged")
+  let diskBeforeRetry = try Settings.load(from: backup)
+  require(diskBeforeRetry == original, "failed display save preserves prior disk state")
+  try fm.removeItem(at: controller.settingsURL)
+  try fm.moveItem(at: backup, to: controller.settingsURL)
+  displays().performActionForItem(at: 1)
+  original.displayMode = "selected"
+  require(
+    controller.settings == original && controller.overlays.isEmpty,
+    "selected with no screens covers none")
+  require(
+    displays().items.contains { $0.title == "No selected displays connected" && !$0.isEnabled },
+    "empty selection has native feedback")
+  let reopened = try Settings.load(from: controller.settingsURL)
+  require(reopened == original, "display mode survives restart")
 }
 
 @MainActor
@@ -1657,6 +1730,8 @@ struct Tests {
       ProcessInfo.processInfo.environment["SUE_PAPER_SKIP_FOREGROUND_TESTS"] == "1"
     let app = NSApplication.shared
     try loginItemTests(resources: resources, scratch: scratch)
+    try displaySelectionTests()
+    try displayMenuTests(resources: resources, scratch: scratch)
     try settingsTests(scratch)
     try scheduleTests(fixture: URL(fileURLWithPath: CommandLine.arguments[4]), scratch: scratch)
     try textureTests(resources: resources, evidence: evidence)
