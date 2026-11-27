@@ -26,6 +26,10 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
   var foregroundIdentityProvider: () -> String? = {
     AppController.identity(NSWorkspace.shared.frontmostApplication)
   }
+  var foregroundIsOwnProvider: () -> Bool = {
+    NSWorkspace.shared.frontmostApplication?.processIdentifier
+      == ProcessInfo.processInfo.processIdentifier
+  }
   private var lock: Int32 = -1
   private var observers: [(NotificationCenter, NSObjectProtocol)] = []
   private var snoozeTimer: Timer?
@@ -41,6 +45,11 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
   /// Synthetic tests can supply no screens to avoid creating overlays.
   var screensProvider: () -> [NSScreen] = { NSScreen.screens }
   private var menuForeground: String?
+  private var lastForeground: String?
+  private var activeForeground: String?
+  private var loadedTexture: String?
+  private var loadedTone: PaperTone?
+  private var editingProfileIntensity: String?
 
   init(settingsDirectory: URL, resources: URL, loginItem: LoginItem = .unavailable) throws {
     settingsURL = settingsDirectory.appendingPathComponent("settings.json")
@@ -70,6 +79,8 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
       record(error, notice: .loadFailed)
     }
     intensityImages = try textures.images(texture: settings.texture, tone: settings.tone)
+    loadedTexture = settings.texture
+    loadedTone = settings.tone
     guard presentUI else { return }
     try rebuildOverlays()
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -137,14 +148,19 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
       [weak self] notification in
       let activated =
         notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-      let identity = activated?.bundleIdentifier ?? activated?.executableURL?.absoluteString
-      MainActor.assumeIsolated { if let self { action(self, identity) } }
+      MainActor.assumeIsolated {
+        guard let self else { return }
+        let identity =
+          activated?.processIdentifier == ProcessInfo.processInfo.processIdentifier
+          ? self.lastForeground : Self.identity(activated)
+        action(self, identity)
+      }
     }
     observers.append((center, token))
   }
 
   func rebuildOverlays() throws {
-    let activeIntensity = previewIntensity ?? settings.intensity
+    let activeIntensity = previewIntensity ?? settings.appearance(for: activeForeground).intensity
     guard let image = intensityImages[activeIntensity] else {
       throw NSError(
         domain: "SuePaper", code: 4,
@@ -163,14 +179,33 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
   }
 
   func applyVisibility() {
-    applyVisibility(foreground: foregroundIdentityProvider())
+    applyVisibility(
+      foreground: foregroundIsOwnProvider() ? lastForeground : foregroundIdentityProvider())
   }
 
-  private func applyVisibility(foreground: String?) {
+  func applyVisibility(foreground: String?) {
     updateVisibility(foreground: foreground, reorder: true)
   }
 
   private func updateVisibility(foreground: String?, reorder: Bool) {
+    activeForeground = foreground
+    lastForeground = foreground
+    let appearance = settings.appearance(for: foreground)
+    do {
+      if loadedTexture != appearance.texture || loadedTone != settings.tone {
+        intensityImages = try textures.images(texture: appearance.texture, tone: settings.tone)
+        loadedTexture = appearance.texture
+        loadedTone = settings.tone
+      }
+      let profile = settings.profiles.first { $0.identity == foreground }
+      let previewApplies =
+        editingProfileIntensity == foreground
+        || (editingProfileIntensity == nil && profile?.intensity == nil)
+      let intensity = (previewApplies ? previewIntensity : nil) ?? appearance.intensity
+      if let image = intensityImages[intensity] {
+        for overlay in overlays { (overlay.contentView as? TextureView)?.image = image }
+      }
+    } catch { record(error, notice: .displaysFailed) }
     updateScheduleTimer()
     let now = Date()
     let zone = TimeZone.current
@@ -203,8 +238,7 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
     guard scheduleTimer == nil else { return }
     let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
       MainActor.assumeIsolated {
-        self?.updateVisibility(
-          foreground: self?.foregroundIdentityProvider(), reorder: false)
+        self?.applyVisibility()
       }
     }
     scheduleTimer = timer
@@ -226,18 +260,15 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
   @discardableResult
   private func change(_ updated: Settings) -> Bool {
     do {
-      var images = intensityImages
-      if updated.texture != settings.texture || updated.tone != settings.tone {
-        images = try textures.images(texture: updated.texture, tone: updated.tone)
-      }
+      let appearance = updated.appearance(for: activeForeground)
+      let images = try textures.images(texture: appearance.texture, tone: updated.tone)
       try updated.save(to: settingsURL)
       settings = updated
       intensityImages = images
+      loadedTexture = appearance.texture
+      loadedTone = updated.tone
       previewIntensity = nil
-      if let image = images[settings.intensity] {
-        for overlay in overlays { (overlay.contentView as? TextureView)?.image = image }
-      }
-      (intensityPanel?.contentView as? IntensitySliderView)?.percent = settings.intensity
+      (intensityPanel?.contentView as? IntensitySliderView)?.percent = appearance.intensity
       lastError = nil
       refreshChrome(MenuText.resolved(saved: settings.language))
       applyVisibility()
@@ -284,9 +315,14 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
     let screen =
       NSScreen.screens.first { $0.frame.intersects(buttonRect) } ?? NSScreen.screens.first
     guard let screen else { return }
+    editingProfileIntensity = item.representedObject as? String
+    let initial =
+      editingProfileIntensity.flatMap { identity in
+        settings.profiles.first { $0.identity == identity }?.intensity
+      } ?? settings.intensity
     let title = MenuText.resolved(saved: settings.language).intensityMenu
     let view = IntensitySliderView(
-      intensity: previewIntensity ?? settings.intensity, title: title)
+      intensity: previewIntensity ?? initial, title: title)
     view.onPreview = { [weak self] value in self?.previewIntensity(value) }
     view.onCommit = { [weak self] in self?.commitIntensity() }
     view.onCancel = { [weak self] in self?.cancelIntensityPreview() }
@@ -314,8 +350,10 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
   func previewIntensity(_ value: Int) {
     guard Settings.intensityRange.contains(value) else { return }
     previewIntensity = value
-    if let image = intensityImages[value] {
-      for overlay in overlays { (overlay.contentView as? TextureView)?.image = image }
+    if editingProfileIntensity == nil || editingProfileIntensity == activeForeground {
+      if let image = intensityImages[value] {
+        for overlay in overlays { (overlay.contentView as? TextureView)?.image = image }
+      }
     }
     applyVisibility()
   }
@@ -326,24 +364,17 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
     let value = previewIntensity
     previewIntensity = nil
     guard let value else { return }
-    if value == settings.intensity {
-      restorePersistedIntensity()
-      return
-    }
     var updated = settings
-    updated.intensity = value
-    do {
-      try updated.save(to: settingsURL)
-      settings = updated
-      lastError = nil
-      if let image = intensityImages[settings.intensity] {
-        for overlay in overlays { (overlay.contentView as? TextureView)?.image = image }
+    if let identity = editingProfileIntensity {
+      guard let index = updated.profiles.firstIndex(where: { $0.identity == identity }) else {
+        restorePersistedIntensity()
+        return
       }
-      applyVisibility()
-    } catch {
-      record(error, notice: .saveFailed)
-      restorePersistedIntensity()
+      updated.profiles[index].intensity = value
+    } else {
+      updated.intensity = value
     }
+    if !change(updated) { restorePersistedIntensity() }
   }
 
   /// Discards an uncommitted preview without touching storage and restores overlays
@@ -355,10 +386,11 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
 
   private func restorePersistedIntensity() {
     previewIntensity = nil
-    if let image = intensityImages[settings.intensity] {
+    let intensity = settings.appearance(for: activeForeground).intensity
+    if let image = intensityImages[intensity] {
       for overlay in overlays { (overlay.contentView as? TextureView)?.image = image }
     }
-    (intensityPanel?.contentView as? IntensitySliderView)?.percent = settings.intensity
+    (intensityPanel?.contentView as? IntensitySliderView)?.percent = intensity
     applyVisibility()
   }
 
@@ -390,6 +422,43 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
     } else {
       updated.exclusions.append(identity)
     }
+    change(updated)
+  }
+
+  @objc func createProfile() {
+    guard let identity = menuForeground,
+      !settings.profiles.contains(where: { $0.identity == identity })
+    else { return }
+    var updated = settings
+    updated.profiles.append(AppProfile(identity: identity))
+    change(updated)
+  }
+
+  @objc func removeProfile(_ item: NSMenuItem) {
+    guard let identity = item.representedObject as? String else { return }
+    var updated = settings
+    updated.profiles.removeAll { $0.identity == identity }
+    change(updated)
+  }
+
+  @objc func setProfileTexture(_ item: NSMenuItem) {
+    guard let identity = item.representedObject as? String else { return }
+    var updated = settings
+    guard let index = updated.profiles.firstIndex(where: { $0.identity == identity }) else {
+      return
+    }
+    guard item.tag == -1 || Settings.textures.indices.contains(item.tag) else { return }
+    updated.profiles[index].texture = item.tag < 0 ? nil : Settings.textures[item.tag]
+    change(updated)
+  }
+
+  @objc func resetProfileIntensity(_ item: NSMenuItem) {
+    guard let identity = item.representedObject as? String else { return }
+    var updated = settings
+    guard let index = updated.profiles.firstIndex(where: { $0.identity == identity }) else {
+      return
+    }
+    updated.profiles[index].intensity = nil
     change(updated)
   }
 
@@ -472,12 +541,17 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
   }
 
   func populateMenu(_ menu: NSMenu, foreground: NSRunningApplication?) {
+    let identity =
+      foreground?.processIdentifier == ProcessInfo.processInfo.processIdentifier
+      ? lastForeground : Self.identity(foreground)
+    populateMenu(menu, foregroundIdentity: identity, foregroundName: foreground?.localizedName)
+  }
+
+  func populateMenu(_ menu: NSMenu, foregroundIdentity: String?, foregroundName: String?) {
     menu.removeAllItems()
     let text = MenuText.resolved(saved: settings.language)
     refreshChrome(text)
-    menuForeground =
-      foreground?.processIdentifier == ProcessInfo.processInfo.processIdentifier
-      ? nil : Self.identity(foreground)
+    menuForeground = foregroundIdentity
     func item(
       _ title: String, _ action: Selector?, tag: Int = 0,
       checked: Bool = false, represented: String? = nil, parent: NSMenu? = nil
@@ -529,11 +603,51 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
     }
     if let identity = menuForeground {
       let excluded = settings.exclusions.contains(identity)
-      let name = foreground?.localizedName ?? text.unnamedApp
+      let name = foregroundName ?? text.unnamedApp
       item(
         text.exclusionTitle(name: name, excluded: excluded),
         #selector(toggleExclusion), checked: excluded)
     }
+    let profilesMenu = NSMenu()
+    let chinese = text.language == .zhHans
+    let create = NSMenuItem(
+      title: (chinese ? "为当前应用创建配置" : "Create profile for current app")
+        + (menuForeground.map { " (\($0))" } ?? ""),
+      action: #selector(createProfile), keyEquivalent: "")
+    create.target = self
+    create.isEnabled =
+      menuForeground != nil
+      && !settings.profiles.contains { $0.identity == menuForeground }
+    profilesMenu.addItem(create)
+    for profile in settings.profiles {
+      let profileMenu = NSMenu()
+      let texturesMenu = NSMenu()
+      item(
+        chinese ? "跟随全局" : "Use global", #selector(setProfileTexture(_:)), tag: -1,
+        checked: profile.texture == nil, represented: profile.identity, parent: texturesMenu)
+      for (index, texture) in Settings.textures.enumerated() {
+        item(
+          MenuText.textureTitle(id: texture, language: text.language),
+          #selector(setProfileTexture(_:)), tag: index, checked: profile.texture == texture,
+          represented: profile.identity, parent: texturesMenu)
+      }
+      let textureEntry = NSMenuItem(title: text.textureMenu, action: nil, keyEquivalent: "")
+      textureEntry.submenu = texturesMenu
+      profileMenu.addItem(textureEntry)
+      item(
+        text.intensityTitle(profile.intensity ?? settings.intensity), #selector(openIntensity(_:)),
+        represented: profile.identity, parent: profileMenu)
+      item(
+        chinese ? "强度跟随全局" : "Use global intensity", #selector(resetProfileIntensity(_:)),
+        checked: profile.intensity == nil, represented: profile.identity, parent: profileMenu)
+      item(
+        chinese ? "移除配置" : "Remove profile", #selector(removeProfile(_:)),
+        represented: profile.identity, parent: profileMenu)
+      let entry = NSMenuItem(title: profile.identity, action: nil, keyEquivalent: "")
+      entry.submenu = profileMenu
+      profilesMenu.addItem(entry)
+    }
+    submenu(chinese ? "应用配置" : "App profiles", profilesMenu)
     if let lastError { item(text.notice(lastError), nil) }
     menu.addItem(.separator())
     appendLoginItemMenu(to: menu, text: text)
@@ -544,7 +658,10 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
   func windowWillClose(_ notification: Notification) {
     // Discard any uncommitted preview so cancelling never writes unsaved values.
     cancelIntensityPreview()
-    if intensityPanel === notification.object as? NSPanel { intensityPanel = nil }
+    if intensityPanel === notification.object as? NSPanel {
+      intensityPanel = nil
+      editingProfileIntensity = nil
+    }
   }
 
   func shutdown() {

@@ -203,12 +203,115 @@ fn append(menu: HMENU, id: u16, text: &str, checked: bool, grayed: bool) {
 /// 弹出托盘菜单，返回用户选择的命令 ID（0 = 未选择）。
 /// `request.foreground` 必须在弹菜单之前捕获（弹菜单会把前台切到本进程）。
 /// 每次弹出都按当前语言整表重建，避免中英标签混在同一菜单里。
-pub unsafe fn show_menu(owner: HWND, request: &MenuRequest<'_>) -> u32 {
+pub unsafe fn show_menu(
+    owner: HWND,
+    request: &MenuRequest<'_>,
+    settings: &crate::settings::Settings,
+    identity: Option<&str>,
+) -> u32 {
     let menu = match CreatePopupMenu() {
         Ok(m) => m,
         Err(_) => return 0,
     };
-    fill_menu(menu, &menu_model(request));
+    let mut nodes = menu_model(request);
+    let zh = request.language == crate::locale::Language::ZhHans;
+    let cmd = |id, label: String, checked, enabled| MenuNode::Command {
+        id,
+        label,
+        checked,
+        enabled,
+    };
+    let mut entries = vec![cmd(
+        crate::ID_PROFILE_CREATE,
+        format!(
+            "{}{}",
+            if zh {
+                "为当前应用创建配置"
+            } else {
+                "Create profile for current app"
+            },
+            identity
+                .map(|id| format!(" ({})", id.replace('&', "&&")))
+                .unwrap_or_default()
+        ),
+        false,
+        identity.is_some()
+            && settings.profiles.len() < crate::MAX_PROFILES
+            && !settings
+                .profiles
+                .iter()
+                .any(|p| Some(p.identity.as_str()) == identity),
+    )];
+    for (index, profile) in settings
+        .profiles
+        .iter()
+        .take(crate::MAX_PROFILES)
+        .enumerate()
+    {
+        let base = crate::ID_PROFILE_BASE + index as u16 * crate::PROFILE_STRIDE;
+        let mut textures = vec![cmd(
+            base,
+            if zh { "跟随全局" } else { "Use global" }.into(),
+            profile.texture.is_none(),
+            true,
+        )];
+        for (i, kind) in crate::texture::KINDS.iter().enumerate() {
+            let name = crate::texture::KIND_NAMES[i];
+            let split = name
+                .char_indices()
+                .find(|(_, c)| ('\u{4e00}'..='\u{9fff}').contains(c))
+                .map(|(n, _)| n)
+                .unwrap_or(name.len());
+            let label = if zh { &name[split..] } else { &name[..split] };
+            textures.push(cmd(
+                base + 1 + i as u16,
+                label.trim().into(),
+                profile.texture == Some(*kind),
+                true,
+            ));
+        }
+        let mut intensities = vec![cmd(
+            base + 5,
+            if zh { "跟随全局" } else { "Use global" }.into(),
+            profile.intensity.is_none(),
+            true,
+        )];
+        for (i, value) in crate::INTENSITIES.iter().enumerate() {
+            intensities.push(cmd(
+                base + 6 + i as u16,
+                format!("{value}%"),
+                profile.intensity == Some(*value),
+                true,
+            ));
+        }
+        entries.push(MenuNode::Submenu {
+            label: profile.identity.replace('&', "&&"),
+            items: vec![
+                MenuNode::Submenu {
+                    label: if zh { "纹理" } else { "Texture" }.into(),
+                    items: textures,
+                },
+                MenuNode::Submenu {
+                    label: if zh { "强度" } else { "Intensity" }.into(),
+                    items: intensities,
+                },
+                cmd(
+                    base + 10,
+                    if zh { "移除配置" } else { "Remove profile" }.into(),
+                    false,
+                    true,
+                ),
+            ],
+        });
+    }
+    nodes.insert(
+        nodes.len() - 2,
+        MenuNode::Submenu {
+            label: if zh { "应用配置" } else { "App profiles" }.into(),
+            items: entries,
+        },
+    );
+    fill_menu(menu, &nodes);
 
     let mut pt = POINT::default();
     let _ = GetCursorPos(&mut pt);

@@ -8,7 +8,24 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
 
 /// 返回当前前台窗口所属进程的可执行文件名（小写），如 "notepad.exe"
-pub fn foreground_process_name() -> Option<String> {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Foreground {
+    pub path: String,
+    pub name: String,
+}
+
+pub fn foreground_is_own() -> bool {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        let mut pid = 0;
+        if !hwnd.0.is_null() {
+            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        }
+        pid != 0 && pid == std::process::id()
+    }
+}
+
+pub fn foreground_process() -> Option<Foreground> {
     unsafe {
         let hwnd: HWND = GetForegroundWindow();
         if hwnd.0.is_null() {
@@ -17,6 +34,9 @@ pub fn foreground_process_name() -> Option<String> {
         let mut pid = 0u32;
         GetWindowThreadProcessId(hwnd, Some(&mut pid));
         if pid == 0 {
+            return None;
+        }
+        if pid == std::process::id() {
             return None;
         }
         let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
@@ -32,6 +52,11 @@ pub fn foreground_process_name() -> Option<String> {
         let _ = CloseHandle(process);
         result.ok()?;
         let path = String::from_utf16_lossy(&buf[..len as usize]);
-        path.rsplit('\\').next().map(|s| s.to_lowercase())
+        let path = path.to_lowercase();
+        let name = path.rsplit('\\').next()?.to_string();
+        if name.is_empty() {
+            return None;
+        }
+        Some(Foreground { path, name })
     }
 }

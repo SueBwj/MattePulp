@@ -1644,6 +1644,100 @@ final class TestDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
   }
 }
 
+@MainActor
+func profileSettingsTests(_ scratch: URL) throws {
+  let old = try JSONDecoder().decode(
+    Settings.self, from: Data("{\"texture\":\"Parchment\",\"intensity\":25}".utf8))
+  require(old.profiles.isEmpty, "old settings create no profiles")
+  var settings = old
+  settings.profiles = [
+    AppProfile(identity: "com.example.first", texture: "VellumMist", intensity: nil),
+    AppProfile(identity: "com.example.second", texture: nil, intensity: 17),
+  ]
+  let first = settings.appearance(for: "com.example.first")
+  let second = settings.appearance(for: "com.example.second")
+  let missing = settings.appearance(for: nil)
+  require(first.texture == "VellumMist" && first.intensity == 25, "partial texture override")
+  require(second.texture == "Parchment" && second.intensity == 17, "partial intensity override")
+  require(missing.texture == "Parchment" && missing.intensity == 25, "missing identity uses global")
+  require(
+    settings.texture == "Parchment" && settings.intensity == 25,
+    "switches do not alter global values")
+  settings.exclusions = ["com.example.first"]
+  require(
+    !Visibility().isVisible(settings: settings, foreground: "com.example.first"),
+    "exclusion wins over profile")
+  let path = scratch.appendingPathComponent("profile-settings/settings.json")
+  try settings.save(to: path)
+  let loaded = try Settings.load(from: path)
+  require(loaded == settings, "profiles round trip")
+  settings.profiles.removeFirst()
+  try settings.save(to: path)
+  let removed = try Settings.load(from: path)
+  require(removed.profiles.count == 1, "profile removal persists")
+}
+
+@MainActor
+func profileMenuTests(resources: URL, scratch: URL) throws {
+  let directory = scratch.appendingPathComponent("profile-menu")
+  var identity: String? = "com.example.first"
+  let controller = try AppController(settingsDirectory: directory, resources: resources)
+  controller.foregroundIdentityProvider = { identity }
+  controller.foregroundIsOwnProvider = { false }
+  var initial = Settings()
+  initial.language = "en"
+  initial.texture = "Parchment"
+  initial.intensity = 25
+  try initial.save(to: controller.settingsURL)
+  try controller.start(presentUI: false)
+  defer { controller.shutdown() }
+  let menu = NSMenu()
+  func profiles() -> NSMenu {
+    controller.populateMenu(menu, foregroundIdentity: identity, foregroundName: "Fixture")
+    return menu.item(withTitle: "App profiles")!.submenu!
+  }
+  require(controller.settings.profiles.isEmpty, "profile is never created implicitly")
+  profiles().performActionForItem(at: 0)
+  require(controller.settings.profiles.count == 1, "create selects explicit foreground identity")
+  let profile = profiles().item(withTitle: "com.example.first")!.submenu!
+  let texture = profile.item(withTitle: "Texture")!.submenu!
+  texture.performActionForItem(at: 4)
+  require(controller.settings.profiles[0].texture == "VellumMist", "edit profile texture")
+  require(
+    controller.settings.texture == "Parchment" && controller.settings.intensity == 25,
+    "profile edit preserves globals")
+  controller.applyVisibility(foreground: identity)
+  let applied = controller.intensityImages[25]!
+  identity = "com.example.second"
+  controller.applyVisibility(foreground: identity)
+  require(
+    controller.intensityImages[25]! !== applied,
+    "switch to unmatched identity restores global texture")
+  identity = nil
+  controller.applyVisibility(foreground: identity)
+  require(
+    controller.settings.appearance(for: identity).texture == "Parchment",
+    "unavailable identity uses global")
+  let fm = FileManager.default
+  let backup = directory.appendingPathComponent("backup.json")
+  try fm.moveItem(at: controller.settingsURL, to: backup)
+  try fm.createDirectory(at: controller.settingsURL, withIntermediateDirectories: false)
+  let failing = profiles().item(withTitle: "com.example.first")!.submenu!
+  failing.performActionForItem(at: failing.items.count - 1)
+  require(
+    controller.settings.profiles.count == 1 && controller.lastError == .saveFailed,
+    "failed removal preserves in-memory profile")
+  try fm.removeItem(at: controller.settingsURL)
+  try fm.moveItem(at: backup, to: controller.settingsURL)
+  let profileMenu = profiles().item(withTitle: "com.example.first")!.submenu!
+  profileMenu.performActionForItem(at: profileMenu.items.count - 1)
+  require(controller.settings.profiles.isEmpty, "profile removal persists")
+  let disk = try Settings.load(from: controller.settingsURL)
+  require(
+    disk.profiles.isEmpty && disk.texture == "Parchment" && disk.intensity == 25,
+    "profile removal leaves global settings intact")
+}
+
 @main
 struct Tests {
   @MainActor static func main() throws {
@@ -1658,10 +1752,12 @@ struct Tests {
     let app = NSApplication.shared
     try loginItemTests(resources: resources, scratch: scratch)
     try settingsTests(scratch)
+    try profileSettingsTests(scratch)
     try scheduleTests(fixture: URL(fileURLWithPath: CommandLine.arguments[4]), scratch: scratch)
     try textureTests(resources: resources, evidence: evidence)
     try toneTextureTests(resources: resources, evidence: evidence)
     try toneMenuTests(resources: resources, scratch: scratch)
+    try profileMenuTests(resources: resources, scratch: scratch)
     try renderSyntheticLanguagePickerSnapshots(to: evidence)
     if CommandLine.arguments.last == "--fixtures-only" {
       app.setActivationPolicy(.prohibited)
