@@ -51,6 +51,9 @@ pub const ID_LOGIN_ENABLE: u16 = 1801;
 pub const ID_LOGIN_DISABLE: u16 = 1802;
 pub const ID_LOGIN_STATUS: u16 = 1803;
 pub const ID_LOGIN_ERROR: u16 = 1804;
+pub const ID_DISPLAYS_ALL: u16 = 1901;
+pub const ID_DISPLAYS_SELECTED: u16 = 1902;
+pub const ID_DISPLAY_BASE: u16 = 2000;
 
 pub const INTENSITIES: [u32; 4] = [15, 20, 25, 30];
 
@@ -68,6 +71,7 @@ struct App {
     hidden_by_exclusion: bool,
     applied_visibility: Option<bool>,
     login_change_failed: bool,
+    display_menu_entries: Vec<(String, String)>,
 }
 
 thread_local! {
@@ -81,6 +85,7 @@ thread_local! {
         hidden_by_exclusion: false,
         applied_visibility: None,
         login_change_failed: false,
+        display_menu_entries: Vec::new(),
     });
 }
 
@@ -207,6 +212,12 @@ unsafe extern "system" fn foreground_changed(
 
 /// 显示器变化时重建覆盖层
 fn rebuild_overlays() {
+    // A failed replacement must never bring an obsolete display window back.
+    APP.with(|app| {
+        let mut app = app.borrow_mut();
+        unsafe { overlay::destroy_all(&mut app.overlays) };
+        app.applied_visibility = None;
+    });
     let hinst = match unsafe { GetModuleHandleW(PCWSTR::null()) } {
         Ok(module) => HINSTANCE(module.0),
         Err(error) => {
@@ -214,7 +225,22 @@ fn rebuild_overlays() {
             return;
         }
     };
-    match unsafe { overlay::spawn_all(hinst) } {
+    let displays = match monitor::displays() {
+        Ok(displays) => displays,
+        Err(error) => {
+            eprintln!("enumerate displays failed: {error}");
+            return;
+        }
+    };
+    let rects: Vec<_> = APP.with(|app| {
+        let app = app.borrow();
+        displays
+            .iter()
+            .filter(|display| app.settings.covers_display(display.id.as_deref()))
+            .map(|display| display.rect)
+            .collect()
+    });
+    match unsafe { overlay::spawn_all(hinst, &rects) } {
         Ok(mut new_overlays) => {
             let prepared = APP.with(|app| {
                 let app = app.borrow();
@@ -257,9 +283,170 @@ fn save_schedule(rules: ScheduleSettings) -> bool {
     saved
 }
 
+fn display_menu() -> locale::MenuNode {
+    use locale::{Language, MenuNode};
+    let live = monitor::displays().unwrap_or_default();
+    APP.with(|app| {
+        let mut app = app.borrow_mut();
+        let chinese = locale::effective_language(app.settings.language) == Language::ZhHans;
+        let selected = app.settings.display_mode == "selected";
+        let mut items = vec![
+            MenuNode::Command {
+                id: ID_DISPLAYS_ALL,
+                label: if chinese {
+                    "全部显示器"
+                } else {
+                    "All displays"
+                }
+                .into(),
+                checked: !selected,
+                enabled: true,
+            },
+            MenuNode::Command {
+                id: ID_DISPLAYS_SELECTED,
+                label: if chinese {
+                    "所选显示器"
+                } else {
+                    "Selected displays"
+                }
+                .into(),
+                checked: selected,
+                enabled: true,
+            },
+        ];
+        let mut entries = Vec::new();
+        if selected {
+            items.push(MenuNode::Separator);
+            let mut connected = std::collections::BTreeSet::new();
+            let mut selected_live = false;
+            for (index, display) in live.iter().enumerate() {
+                let Some(id) = &display.id else {
+                    items.push(MenuNode::Command {
+                        id: 0,
+                        label: if chinese {
+                            "显示器 - 无法识别"
+                        } else {
+                            "Display - Unavailable"
+                        }
+                        .into(),
+                        checked: false,
+                        enabled: false,
+                    });
+                    continue;
+                };
+                connected.insert(id.clone());
+                let checked = app.settings.selected_displays.contains_key(id);
+                selected_live |= checked;
+                let label = format!("{} ({})", display.label, index + 1);
+                if entries.len() < 1000 {
+                    items.push(MenuNode::Command {
+                        id: ID_DISPLAY_BASE + entries.len() as u16,
+                        label: label.replace('&', "&&"),
+                        checked,
+                        enabled: true,
+                    });
+                    entries.push((id.clone(), display.label.clone()));
+                }
+            }
+            for (id, label) in &app.settings.selected_displays {
+                if !connected.contains(id) && entries.len() < 1000 {
+                    items.push(MenuNode::Command {
+                        id: ID_DISPLAY_BASE + entries.len() as u16,
+                        label: format!(
+                            "{} ({}) - {}",
+                            label.replace('&', "&&"),
+                            entries.len() + 1,
+                            if chinese {
+                                "未连接或不可识别"
+                            } else {
+                                "Disconnected or unavailable"
+                            }
+                        ),
+                        checked: true,
+                        enabled: true,
+                    });
+                    entries.push((id.clone(), label.clone()));
+                }
+            }
+            if !selected_live {
+                items.push(MenuNode::Command {
+                    id: 0,
+                    label: if chinese {
+                        "没有选中的已连接显示器"
+                    } else {
+                        "No selected displays connected"
+                    }
+                    .into(),
+                    checked: false,
+                    enabled: false,
+                });
+            }
+        }
+        app.display_menu_entries = entries;
+        MenuNode::Submenu {
+            label: if chinese { "显示器" } else { "Displays" }.into(),
+            items,
+        }
+    })
+}
+
 fn handle_command(hwnd: HWND, cmd: u32, fg_name: Option<String>) {
     let cmd = cmd as u16;
     match cmd {
+        ID_DISPLAYS_ALL | ID_DISPLAYS_SELECTED => {
+            let saved = APP.with(|app| {
+                let mut app = app.borrow_mut();
+                let mut updated = app.settings.clone();
+                updated.display_mode = if cmd == ID_DISPLAYS_ALL {
+                    "all"
+                } else {
+                    "selected"
+                }
+                .into();
+                match app
+                    .settings
+                    .change_displays(updated.display_mode, updated.selected_displays)
+                {
+                    Ok(()) => true,
+                    Err(error) => {
+                        eprintln!("save display settings failed: {error}");
+                        false
+                    }
+                }
+            });
+            if saved {
+                rebuild_overlays();
+            }
+        }
+        c if (ID_DISPLAY_BASE..ID_DISPLAY_BASE + 1000).contains(&c) => {
+            let saved = APP.with(|app| {
+                let mut app = app.borrow_mut();
+                let Some((id, label)) = app
+                    .display_menu_entries
+                    .get((c - ID_DISPLAY_BASE) as usize)
+                    .cloned()
+                else {
+                    return false;
+                };
+                let mut updated = app.settings.clone();
+                if updated.selected_displays.remove(&id).is_none() {
+                    updated.selected_displays.insert(id, label);
+                }
+                match app
+                    .settings
+                    .change_displays(updated.display_mode, updated.selected_displays)
+                {
+                    Ok(()) => true,
+                    Err(error) => {
+                        eprintln!("save display settings failed: {error}");
+                        false
+                    }
+                }
+            });
+            if saved {
+                rebuild_overlays();
+            }
+        }
         ID_TOGGLE => {
             APP.with(|app| {
                 let mut app = app.borrow_mut();
@@ -432,7 +619,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                         login_change_failed: app.login_change_failed,
                     }
                 });
-                let cmd = tray::show_menu(hwnd, &request);
+                let display_nodes = display_menu();
+                let cmd = tray::show_menu(hwnd, &request, &display_nodes);
                 if cmd != 0 {
                     handle_command(hwnd, cmd, fg);
                 }
@@ -520,15 +708,8 @@ fn run() -> windows::core::Result<()> {
         }
         APP.with(|app| app.borrow_mut().tray_icon = Some(icon));
 
-        let overlays = match overlay::spawn_all(hinst) {
-            Ok(overlays) => overlays,
-            Err(error) => {
-                let _ = DestroyWindow(hwnd);
-                return Err(error);
-            }
-        };
-        APP.with(|app| app.borrow_mut().overlays = overlays);
         refresh_textures();
+        rebuild_overlays();
         poll_exclusion();
 
         let hook = SetWinEventHook(

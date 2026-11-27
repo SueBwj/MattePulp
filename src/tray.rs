@@ -203,12 +203,14 @@ fn append(menu: HMENU, id: u16, text: &str, checked: bool, grayed: bool) {
 /// 弹出托盘菜单，返回用户选择的命令 ID（0 = 未选择）。
 /// `request.foreground` 必须在弹菜单之前捕获（弹菜单会把前台切到本进程）。
 /// 每次弹出都按当前语言整表重建，避免中英标签混在同一菜单里。
-pub unsafe fn show_menu(owner: HWND, request: &MenuRequest<'_>) -> u32 {
+pub unsafe fn show_menu(owner: HWND, request: &MenuRequest<'_>, displays: &MenuNode) -> u32 {
     let menu = match CreatePopupMenu() {
         Ok(m) => m,
         Err(_) => return 0,
     };
-    fill_menu(menu, &menu_model(request));
+    let mut nodes = menu_model(request);
+    nodes.insert(1, displays.clone());
+    fill_menu(menu, &nodes);
 
     let mut pt = POINT::default();
     let _ = GetCursorPos(&mut pt);

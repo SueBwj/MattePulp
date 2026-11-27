@@ -27,7 +27,7 @@ Windows v0.1.0 (`53b266a`) still has the older tray art and a single-language UI
 
 ## Usage
 
-The texture covers every screen. The pointer and keyboard pass through it; it does not take focus or appear in window switching. Mac display limits are in the [Mac notes](macos/README.md#display-behavior).
+By default the texture covers every screen. In builds from source, **Displays** lets you choose all or selected displays. All includes newly connected screens; selected membership is remembered while a display is disconnected. A display with an unavailable or ambiguous identity cannot be selected, and no screen is covered if none of the selected displays is connected. The pointer and keyboard pass through the texture; it does not take focus or appear in window switching. Mac display limits are in the [Mac notes](macos/README.md#display-behavior).
 
 Four textures come from fractal noise and tile without a seam. Texture ids match the published packages (table below); intensity uses a 15%-30% slider in 1% steps on macOS and 4 levels (15% / 20% / 25% / 30%) on Windows.
 

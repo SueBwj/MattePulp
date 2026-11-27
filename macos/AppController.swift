@@ -144,17 +144,34 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
   }
 
   func rebuildOverlays() throws {
+    // Once a topology changes, obsolete windows must never become visible again.
+    let previous = overlays
+    overlays = []
+    for overlay in previous { overlay.close() }
     let activeIntensity = previewIntensity ?? settings.intensity
     guard let image = intensityImages[activeIntensity] else {
       throw NSError(
         domain: "SuePaper", code: 4,
         userInfo: [NSLocalizedDescriptionKey: "No texture loaded for current intensity"])
     }
-    let replacements = screensProvider().map { Overlay(screen: $0, image: image) }
-    let previous = overlays
+    let screens = screensProvider()
+    let identities = screens.map(Self.displayIdentity)
+    let replacements = screens.enumerated().compactMap { index, screen -> Overlay? in
+      guard settings.coversDisplay(at: index, identities: identities) else { return nil }
+      return Overlay(screen: screen, image: image)
+    }
     overlays = replacements
     applyVisibility()
-    for overlay in previous { overlay.close() }
+  }
+
+  // Persist the system UUID, never the transient CGDirectDisplayID or the visible name.
+  // https://developer.apple.com/documentation/colorsync/cgdisplaycreateuuidfromdisplayid(_:)
+  static func displayIdentity(_ screen: NSScreen) -> String? {
+    guard
+      let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
+      let uuid = CGDisplayCreateUUIDFromDisplayID(number.uint32Value)?.takeRetainedValue()
+    else { return nil }
+    return CFUUIDCreateString(nil, uuid) as String
   }
 
   static func identity(_ app: NSRunningApplication?) -> String? {
@@ -183,7 +200,7 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
       guard reorder || overlay.isVisible != visible else { continue }
       if visible { overlay.orderFrontRegardless() } else { overlay.orderOut(nil) }
     }
-    statusItem?.button?.appearsDisabled = !visible
+    statusItem?.button?.appearsDisabled = !visible || overlays.isEmpty
     if let panel = scheduleWindow, panel.window?.isVisible == true {
       panel.refresh(
         result, settings: settings.schedule, now: now, zone: zone, manual: settings.enabled,
@@ -246,6 +263,27 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
       record(error, notice: .saveFailed)
       return false
     }
+  }
+
+  @objc func selectDisplayMode(_ item: NSMenuItem) {
+    var updated = settings
+    updated.displayMode = item.tag == 0 ? "all" : "selected"
+    guard updated.displayMode != settings.displayMode, change(updated) else { return }
+    do { try rebuildOverlays() } catch { record(error, notice: .displaysFailed) }
+  }
+
+  @objc func toggleDisplay(_ item: NSMenuItem) {
+    guard let id = item.representedObject as? String else { return }
+    var updated = settings
+    if updated.selectedDisplays[id] != nil {
+      updated.selectedDisplays.removeValue(forKey: id)
+    } else {
+      let matches = screensProvider().filter { Self.displayIdentity($0) == id }
+      guard matches.count == 1 else { return }
+      updated.selectedDisplays[id] = matches[0].localizedName
+    }
+    guard change(updated) else { return }
+    do { try rebuildOverlays() } catch { record(error, notice: .displaysFailed) }
   }
 
   @objc func toggle() {
@@ -497,6 +535,51 @@ final class AppController: NSObject, NSMenuDelegate, NSWindowDelegate {
       menu.addItem(entry)
     }
     item(text.toggle, #selector(toggle), checked: settings.enabled)
+    let chinese = text.language == .zhHans
+    let displayMenu = NSMenu(title: chinese ? "显示器" : "Displays")
+    item(
+      chinese ? "全部显示器" : "All displays", #selector(selectDisplayMode(_:)), tag: 0,
+      checked: settings.displayMode == "all", parent: displayMenu)
+    item(
+      chinese ? "所选显示器" : "Selected displays", #selector(selectDisplayMode(_:)), tag: 1,
+      checked: settings.displayMode == "selected", parent: displayMenu)
+    if settings.displayMode == "selected" {
+      displayMenu.addItem(.separator())
+      let screens = screensProvider()
+      let ids = screens.map(Self.displayIdentity)
+      let counts = Dictionary(ids.compactMap { $0 }.map { ($0, 1) }, uniquingKeysWith: +)
+      var connected = Set<String>()
+      for (index, pair) in zip(screens, ids).enumerated() {
+        let (screen, id) = pair
+        let title = "\(screen.localizedName) (\(index + 1))"
+        guard let id, counts[id] == 1 else {
+          let entry = displayMenu.addItem(
+            withTitle: title + (chinese ? " - 无法识别" : " - Unavailable"), action: nil,
+            keyEquivalent: "")
+          entry.isEnabled = false
+          continue
+        }
+        connected.insert(id)
+        item(
+          title, #selector(toggleDisplay(_:)), checked: settings.selectedDisplays[id] != nil,
+          represented: id, parent: displayMenu)
+      }
+      let disconnected = settings.selectedDisplays.sorted(by: { $0.key < $1.key })
+        .filter { !connected.contains($0.key) }
+      for (index, entry) in disconnected.enumerated() {
+        let (id, title) = entry
+        item(
+          "\(title) (\(index + 1))" + (chinese ? " - 未连接或不可识别" : " - Disconnected or unavailable"),
+          #selector(toggleDisplay(_:)), checked: true, represented: id, parent: displayMenu)
+      }
+      if !ids.indices.contains(where: { settings.coversDisplay(at: $0, identities: ids) }) {
+        let notice = displayMenu.addItem(
+          withTitle: chinese ? "没有选中的已连接显示器" : "No selected displays connected", action: nil,
+          keyEquivalent: "")
+        notice.isEnabled = false
+      }
+    }
+    submenu(chinese ? "显示器" : "Displays", displayMenu)
     let textureMenu = NSMenu(title: text.textureMenu)
     for (index, texture) in textures.catalog.enumerated() {
       item(
