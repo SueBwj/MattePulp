@@ -52,6 +52,11 @@ pub const ID_LOGIN_DISABLE: u16 = 1802;
 pub const ID_LOGIN_STATUS: u16 = 1803;
 pub const ID_LOGIN_ERROR: u16 = 1804;
 
+pub const ID_PROFILE_CREATE: u16 = 1900;
+pub const ID_PROFILE_BASE: u16 = 2000;
+pub const PROFILE_STRIDE: u16 = 11;
+pub const MAX_PROFILES: usize = 1000;
+
 pub const INTENSITIES: [u32; 4] = [15, 20, 25, 30];
 
 const TIMER_POLL: usize = 1; // 前台应用轮询
@@ -66,6 +71,7 @@ struct App {
     foreground_hook: Option<HWINEVENTHOOK>,
     snoozed: bool,
     hidden_by_exclusion: bool,
+    foreground: Option<exclusion::Foreground>,
     applied_visibility: Option<bool>,
     login_change_failed: bool,
 }
@@ -79,6 +85,7 @@ thread_local! {
         foreground_hook: None,
         snoozed: false,
         hidden_by_exclusion: false,
+        foreground: None,
         applied_visibility: None,
         login_change_failed: false,
     });
@@ -130,7 +137,10 @@ fn foreground_is_excluded(exclusions: &[String], foreground: Option<&str>) -> bo
 fn refresh_textures() {
     APP.with(|app| {
         let mut app = app.borrow_mut();
-        app.texture_tile = generate_tile(app.settings.texture, app.settings.intensity);
+        let (texture, intensity) = app
+            .settings
+            .appearance(app.foreground.as_ref().map(|f| f.path.as_str()));
+        app.texture_tile = generate_tile(texture, intensity);
         let tone = app.settings.tone;
         tone.apply(&mut app.texture_tile);
         let App {
@@ -184,11 +194,27 @@ fn ensure_overlays_topmost() {
 
 /// 轮询前台应用，命中排除列表时隐藏纹理
 fn poll_exclusion() {
-    let fg = exclusion::foreground_process_name();
-    APP.with(|app| {
+    let own = exclusion::foreground_is_own();
+    let fg = exclusion::foreground_process();
+    let changed = APP.with(|app| {
         let mut app = app.borrow_mut();
-        app.hidden_by_exclusion = foreground_is_excluded(&app.settings.exclusions, fg.as_deref());
+        let old = app
+            .settings
+            .appearance(app.foreground.as_ref().map(|f| f.path.as_str()));
+        if !own {
+            app.foreground = fg;
+        }
+        app.hidden_by_exclusion = foreground_is_excluded(
+            &app.settings.exclusions,
+            app.foreground.as_ref().map(|f| f.name.as_str()),
+        );
+        old != app
+            .settings
+            .appearance(app.foreground.as_ref().map(|f| f.path.as_str()))
     });
+    if changed {
+        refresh_textures();
+    }
     apply_visibility();
 }
 
@@ -257,7 +283,7 @@ fn save_schedule(rules: ScheduleSettings) -> bool {
     saved
 }
 
-fn handle_command(hwnd: HWND, cmd: u32, fg_name: Option<String>) {
+fn handle_command(hwnd: HWND, cmd: u32, fg: Option<exclusion::Foreground>) {
     let cmd = cmd as u16;
     match cmd {
         ID_TOGGLE => {
@@ -311,7 +337,7 @@ fn handle_command(hwnd: HWND, cmd: u32, fg_name: Option<String>) {
             apply_visibility();
         }
         ID_EXCLUDE => {
-            if let Some(name) = fg_name {
+            if let Some(name) = fg.as_ref().map(|f| f.name.clone()) {
                 let own = std::env::current_exe()
                     .ok()
                     .and_then(|p| p.file_name().map(|s| s.to_string_lossy().to_lowercase()));
@@ -328,6 +354,59 @@ fn handle_command(hwnd: HWND, cmd: u32, fg_name: Option<String>) {
                 if changed {
                     apply_visibility();
                 }
+            }
+        }
+        ID_PROFILE_CREATE => {
+            if let Some(fg) = fg {
+                let result = APP.with(|app| {
+                    let mut app = app.borrow_mut();
+                    let mut profiles = app.settings.profiles.clone();
+                    if profiles.len() >= MAX_PROFILES
+                        || profiles.iter().any(|p| p.identity == fg.path)
+                    {
+                        return Ok(());
+                    }
+                    profiles.push(settings::AppProfile {
+                        identity: fg.path,
+                        texture: None,
+                        intensity: None,
+                    });
+                    app.settings.update_profiles(profiles)
+                });
+                if let Err(error) = result {
+                    eprintln!("save profile failed: {error}");
+                }
+            }
+        }
+        c if c >= ID_PROFILE_BASE
+            && usize::from((c - ID_PROFILE_BASE) / PROFILE_STRIDE) < MAX_PROFILES =>
+        {
+            let index = usize::from((c - ID_PROFILE_BASE) / PROFILE_STRIDE);
+            let action = (c - ID_PROFILE_BASE) % PROFILE_STRIDE;
+            let result = APP.with(|app| {
+                let mut app = app.borrow_mut();
+                let mut profiles = app.settings.profiles.clone();
+                let Some(profile) = profiles.get_mut(index) else {
+                    return Ok(());
+                };
+                match action {
+                    0 => profile.texture = None,
+                    1..=4 => profile.texture = Some(KINDS[usize::from(action - 1)]),
+                    5 => profile.intensity = None,
+                    6..=9 => profile.intensity = Some(INTENSITIES[usize::from(action - 6)]),
+                    10 => {
+                        profiles.remove(index);
+                    }
+                    _ => return Ok(()),
+                }
+                app.settings.update_profiles(profiles)
+            });
+            match result {
+                Ok(()) => {
+                    refresh_textures();
+                    apply_visibility();
+                }
+                Err(error) => eprintln!("save profile failed: {error}"),
             }
         }
         ID_LANG_ZH | ID_LANG_EN => {
@@ -412,7 +491,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             let event = lparam.0 as u32 & 0xffff;
             if matches!(event, WM_RBUTTONUP | WM_LBUTTONUP | NIN_KEYSELECT) {
                 // 必须在弹菜单之前捕获前台应用（弹菜单会切前台）
-                let fg = exclusion::foreground_process_name();
+                let own = exclusion::foreground_is_own();
+                let fg = if own {
+                    APP.with(|app| app.borrow().foreground.clone())
+                } else {
+                    exclusion::foreground_process()
+                };
                 let login_item = login_item::status();
                 let request = APP.with(|app| {
                     let app = app.borrow();
@@ -422,17 +506,23 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                         texture_index: tex_idx(app.settings.texture),
                         intensity_index: int_idx(app.settings.intensity),
                         tone: app.settings.tone,
-                        foreground: fg.as_deref(),
+                        foreground: fg.as_ref().map(|f| f.name.as_str()),
                         snoozed: app.snoozed,
                         foreground_excluded: foreground_is_excluded(
                             &app.settings.exclusions,
-                            fg.as_deref(),
+                            fg.as_ref().map(|f| f.name.as_str()),
                         ),
                         login_item,
                         login_change_failed: app.login_change_failed,
                     }
                 });
-                let cmd = tray::show_menu(hwnd, &request);
+                let settings = APP.with(|app| app.borrow().settings.clone());
+                let cmd = tray::show_menu(
+                    hwnd,
+                    &request,
+                    &settings,
+                    fg.as_ref().map(|f| f.path.as_str()),
+                );
                 if cmd != 0 {
                     handle_command(hwnd, cmd, fg);
                 }

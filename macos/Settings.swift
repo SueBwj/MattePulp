@@ -6,6 +6,30 @@ enum PaperTone: String, CaseIterable, Codable {
   case warmPaper = "WarmPaper"
 }
 
+struct AppProfile: Codable, Equatable {
+  var identity: String
+  var texture: String?
+  var intensity: Int?
+
+  init(identity: String, texture: String? = nil, intensity: Int? = nil) {
+    self.identity = identity
+    self.texture = texture
+    self.intensity = intensity
+  }
+
+  init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    identity = try values.decode(String.self, forKey: .identity)
+    texture = try? values.decode(String.self, forKey: .texture)
+    intensity = try? values.decode(Int.self, forKey: .intensity)
+  }
+}
+
+private struct DecodableProfile: Decodable {
+  let value: AppProfile?
+  init(from decoder: Decoder) throws { value = try? AppProfile(from: decoder) }
+}
+
 struct Settings: Codable, Equatable {
   static let textures = ["ClassicMatte", "WhisperWeave", "Parchment", "VellumMist"]
   static let intensityRange = 15...30
@@ -16,6 +40,7 @@ struct Settings: Codable, Equatable {
   var tone = PaperTone.original
   // Bundle identifiers, or executable URLs for apps without a bundle identifier.
   var exclusions: [String] = []
+  var profiles: [AppProfile] = []
   /// Saved interface language. Nil follows the system UI language.
   var language: String?
   var schedule = ScheduleSettings()
@@ -29,6 +54,8 @@ struct Settings: Codable, Equatable {
     intensity = try values.decodeIfPresent(Int.self, forKey: .intensity) ?? Self.defaultIntensity
     tone = (try? values.decode(PaperTone.self, forKey: .tone)) ?? .original
     exclusions = try values.decodeIfPresent([String].self, forKey: .exclusions) ?? []
+    profiles =
+      (try? values.decode([DecodableProfile].self, forKey: .profiles))?.compactMap(\.value) ?? []
     language = try values.decodeIfPresent(String.self, forKey: .language)
     schedule = (try? values.decode(ScheduleSettings.self, forKey: .schedule)) ?? ScheduleSettings()
     normalize()
@@ -38,12 +65,37 @@ struct Settings: Codable, Equatable {
     if !Self.textures.contains(texture) { texture = "ClassicMatte" }
     if !Self.intensityRange.contains(intensity) { intensity = Self.defaultIntensity }
     if let language, AppLanguage(rawValue: language) == nil { self.language = nil }
+    var seen = Set<String>()
+    profiles = profiles.compactMap { profile in
+      var profile = profile
+      profile.identity = profile.identity.trimmingCharacters(in: .whitespacesAndNewlines)
+      let fileURL = URL(string: profile.identity)
+      let isPath = fileURL?.isFileURL == true && fileURL?.path.hasPrefix("/") == true
+      let isBundle =
+        !profile.identity.isEmpty
+        && profile.identity.unicodeScalars.allSatisfy {
+          CharacterSet(
+            charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-."
+          ).contains($0)
+        }
+      guard isPath || isBundle, seen.insert(profile.identity).inserted else { return nil }
+      if let texture = profile.texture, !Self.textures.contains(texture) { profile.texture = nil }
+      if let intensity = profile.intensity, !Self.intensityRange.contains(intensity) {
+        profile.intensity = nil
+      }
+      return profile
+    }
     exclusions = Array(
       Set(
         exclusions.map {
           $0.trimmingCharacters(in: .whitespacesAndNewlines)
         }.filter { !$0.isEmpty })
     ).sorted()
+  }
+
+  func appearance(for identity: String?) -> (texture: String, intensity: Int) {
+    let profile = profiles.first { $0.identity == identity }
+    return (profile?.texture ?? texture, profile?.intensity ?? intensity)
   }
 
   static func load(from url: URL) throws -> Settings {

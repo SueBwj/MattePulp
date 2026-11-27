@@ -16,6 +16,15 @@ use crate::locale::{self, Language};
 use crate::schedule_clock::ScheduleSettings;
 use crate::texture::TextureKind;
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppProfile {
+    pub identity: String,
+    #[serde(default)]
+    pub texture: Option<TextureKind>,
+    #[serde(default)]
+    pub intensity: Option<u32>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Settings {
     pub enabled: bool,
@@ -25,6 +34,7 @@ pub struct Settings {
     pub tone: Tone,
     /// 排除列表：进程可执行文件名（小写），如 "photoshop.exe"
     pub exclusions: Vec<String>,
+    pub profiles: Vec<AppProfile>,
     /// 用户选定的界面语言。缺省时跟随系统 UI 语言。
     #[serde(
         skip_serializing_if = "Option::is_none",
@@ -68,6 +78,22 @@ impl<'de> Deserialize<'de> for Settings {
         {
             settings.exclusions = value;
         }
+        if let Some(profiles) = fields.get("profiles").and_then(|v| v.as_array()) {
+            settings.profiles = profiles
+                .iter()
+                .filter_map(|v| {
+                    Some(AppProfile {
+                        identity: v.get("identity")?.as_str()?.to_string(),
+                        texture: v
+                            .get("texture")
+                            .and_then(|v| serde_json::from_value(v.clone()).ok()),
+                        intensity: v
+                            .get("intensity")
+                            .and_then(|v| serde_json::from_value(v.clone()).ok()),
+                    })
+                })
+                .collect();
+        }
         settings.language = fields
             .get("language")
             .and_then(|v| locale::deserialize_language(v.clone()).ok())
@@ -87,6 +113,7 @@ impl Default for Settings {
             intensity: 20,
             tone: Tone::Original,
             exclusions: Vec::new(),
+            profiles: Vec::new(),
             language: None,
             schedule: ScheduleSettings::default(),
         }
@@ -167,9 +194,41 @@ impl Settings {
             .map(|name| name.trim().to_lowercase())
             .filter(|name| !name.is_empty())
             .collect();
+        let mut seen = std::collections::HashSet::new();
+        self.profiles.retain_mut(|profile| {
+            profile.identity = profile.identity.trim().to_lowercase();
+            if !matches!(profile.intensity, None | Some(15 | 20 | 25 | 30)) {
+                profile.intensity = None;
+            }
+            // Only absolute image paths are valid identities, never a basename.
+            let bytes = profile.identity.as_bytes();
+            let absolute = (bytes.len() >= 3 && bytes[1] == b':' && bytes[2] == b'\\')
+                || profile.identity.starts_with("\\\\");
+            absolute && seen.insert(profile.identity.clone())
+        });
         self.exclusions.sort_unstable();
         self.exclusions.dedup();
         self
+    }
+
+    pub fn appearance(&self, identity: Option<&str>) -> (TextureKind, u32) {
+        let profile = identity.and_then(|id| self.profiles.iter().find(|p| p.identity == id));
+        (
+            profile.and_then(|p| p.texture).unwrap_or(self.texture),
+            profile.and_then(|p| p.intensity).unwrap_or(self.intensity),
+        )
+    }
+
+    pub fn update_profiles(&mut self, profiles: Vec<AppProfile>) -> io::Result<()> {
+        self.update_profiles_at(profiles, &settings_path())
+    }
+
+    fn update_profiles_at(&mut self, profiles: Vec<AppProfile>, path: &Path) -> io::Result<()> {
+        let mut updated = self.clone();
+        updated.profiles = profiles;
+        save_to_path(path, &updated)?;
+        *self = updated;
+        Ok(())
     }
 
     /// Adds `name`, or removes it when it is already stored.
@@ -226,6 +285,59 @@ fn save_to_path(path: &Path, settings: &Settings) -> io::Result<()> {
 mod tests {
     use super::*;
     use crate::locale::Language;
+
+    #[test]
+    fn profiles_are_partial_path_scoped_and_atomic() {
+        let text = r#"{"texture":"Parchment","intensity":25,"profiles":[{"identity":"C:\\One\\app.exe","texture":"VellumMist"},{"identity":"C:\\Two\\app.exe","intensity":15},{"identity":"app.exe","intensity":30},{"identity":"C:\\Bad\\app.exe","texture":"Unknown","intensity":99}]}"#;
+        let mut settings = serde_json::from_str::<Settings>(text).unwrap().normalized();
+        assert_eq!(settings.profiles.len(), 3);
+        assert_eq!(
+            settings.appearance(Some(r"c:\one\app.exe")),
+            (TextureKind::VellumMist, 25)
+        );
+        assert_eq!(
+            settings.appearance(Some(r"c:\two\app.exe")),
+            (TextureKind::Parchment, 15)
+        );
+        assert_eq!(
+            settings.appearance(Some(r"c:\bad\app.exe")),
+            (TextureKind::Parchment, 25)
+        );
+        assert_eq!(settings.appearance(None), (TextureKind::Parchment, 25));
+        assert_eq!(
+            (settings.texture, settings.intensity),
+            (TextureKind::Parchment, 25)
+        );
+        let dir = std::env::temp_dir().join(format!("mattepulp-profiles-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        save_to_path(&path, &settings).unwrap();
+        let original = settings.clone();
+        let backup = dir.join("backup.json");
+        std::fs::rename(&path, &backup).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(settings.update_profiles_at(vec![], &path).is_err());
+        assert_eq!(settings, original);
+        std::fs::remove_dir(&path).unwrap();
+        std::fs::rename(&backup, &path).unwrap();
+        let mut edited = settings.profiles.clone();
+        edited[0].intensity = Some(30);
+        edited.remove(1);
+        settings.update_profiles_at(edited, &path).unwrap();
+        assert_eq!(
+            Settings::load_from_paths(&path, &dir.join("none")),
+            settings
+        );
+        assert_eq!(
+            settings.appearance(Some(r"c:\one\app.exe")),
+            (TextureKind::VellumMist, 30)
+        );
+        assert_eq!(
+            settings.appearance(Some(r"c:\two\app.exe")),
+            (TextureKind::Parchment, 25)
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn missing_fields_use_defaults() {

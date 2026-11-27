@@ -44,6 +44,8 @@ In a Windows build from this source, the Snooze menu adds "Resume now" while sno
 
 ![Four textures over the same horizontal lines](showcase/textures.png)
 
+In a build from this source, open **App profiles** and choose **Create profile for current app** to explicitly select the displayed app identity. Each profile has separate texture and intensity choices; choose **Use global** for either field to inherit its global setting. Edit or remove any saved profile from the same menu. Windows identifies apps by their executable path; macOS uses the bundle identifier or, when unavailable, the executable URL. A missing or unmatched identity uses global settings. Exclusions, manual disable, snooze and schedule rules still control visibility.
+
 **Windows.** Unzip the stable package and run `sue-paper.exe`. When you build this source tree, right-click the tray icon: enable texture, texture/intensity/snooze, exclude the current app, language (中文 or English), and quit. The tray tip is 柔纸 in Chinese and MattePulp in English. Settings live in `%APPDATA%\Sue-Paper\settings.json`.
 
 **Mac.** The published image still has the mixed menu and four fixed intensity items. Build `Sue-Paper.app` from this source and click **S** in the menu bar for a one-language menu with a separate language item and a focusable intensity slider panel (15%-30%, 1% steps: drag previews live and saves on release; arrow keys and accessibility adjustments save on every step). Finder shows MattePulp; the executable remains `Sue-Paper`. Settings live in `~/Library/Application Support/Sue-Paper/settings.json`. The app asks for neither Accessibility nor Screen Recording permission.
