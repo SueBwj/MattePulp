@@ -10,7 +10,7 @@
 
 ![Before and after Classic Matte on a synthetic reading scene](showcase/reading-comparison.png)
 
-<sub>Synthetic reading scene with the source-generated Classic Matte texture on the right: Original tone, 20% intensity.</sub>
+<sub>Synthetic reading scene with the source-generated Classic Matte texture on the right: Original tone, 15% intensity.</sub>
 
 ## Find your paper
 
